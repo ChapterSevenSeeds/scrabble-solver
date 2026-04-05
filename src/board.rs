@@ -1,9 +1,53 @@
+use crate::board::ScoreModifier::TripleWord;
 use std::{fs::File, io::Read, os};
 
 pub struct ScrabbleBoard {
     board: [[char; 15]; 15],
     valid_words: std::collections::HashSet<String>,
 }
+
+enum ScoreModifier {
+    None,
+    TWS,
+    DWS,
+    TLS,
+    DLS,
+}
+
+const NON: ScoreModifier = ScoreModifier::None;
+const TWS: ScoreModifier = ScoreModifier::TWS;
+const DWS: ScoreModifier = ScoreModifier::DWS;
+const TLS: ScoreModifier = ScoreModifier::TLS;
+const DLS: ScoreModifier = ScoreModifier::DLS;
+
+#[rustfmt::skip]
+const SCORE_MODIFIERS: [[ScoreModifier; 15]; 15] = {
+    [
+        [TWS, NON, NON, DLS, NON, NON, NON, TWS, NON, NON, NON, DLS, NON, NON, TWS],
+        [NON, DWS, NON, NON, NON, TLS, NON, NON, NON, TLS, NON, NON, NON, DWS, NON],
+        [NON, NON, DWS, NON, NON, NON, DLS, NON, DLS, NON, NON, NON, DWS, NON, NON],
+        [DLS, NON, NON, DWS, NON, NON, NON, DLS, NON, NON, NON, DWS, NON, NON, DLS],
+        [NON, NON, NON, NON, DWS, NON, NON, NON, NON, NON, DWS, NON, NON, NON, NON],
+        [NON, TLS, NON, NON, NON, TLS, NON, NON, NON, TLS, NON, NON, NON, TLS, NON],
+        [NON, NON, DLS, NON, NON, NON, DLS, NON, DLS, NON, NON, NON, DLS, NON, NON],
+        [TWS, NON, NON, DLS, NON, NON, NON, NON, NON, NON, NON, DLS, NON, NON, TWS],
+        [NON, NON, DLS, NON, NON, NON, DLS, NON, DLS, NON, NON, NON, DLS, NON, NON],
+        [NON, TLS, NON, NON, NON, TLS, NON, NON, NON, TLS, NON, NON, NON, TLS, NON],
+        [NON, NON, NON, NON, DWS, NON, NON, NON, NON, NON, DWS, NON, NON, NON, NON],
+        [DLS, NON, NON, DWS, NON, NON, NON, DLS, NON, NON, NON, DWS, NON, NON, DLS],
+        [NON, NON, DWS, NON, NON, NON, DLS, NON, DLS, NON, NON, NON, DWS, NON, NON],
+        [NON, DWS, NON, NON, NON, TLS, NON, NON, NON, TLS, NON, NON, NON, DWS, NON],
+        [TWS, NON, NON, DLS, NON, NON, NON, TWS, NON, NON, NON, DLS, NON, NON, TWS]
+    ]
+};
+
+const SCORES: [u32; 91] = {
+    [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 1, 3, 3, 2, 1, 4, 2, 4, 1, 8, 5, 1, 3, 1, 1, 3, 10, 1, 1, 1, 1, 4, 4, 8, 4, 10
+    ]
+};
 
 impl ScrabbleBoard {
     pub fn new() -> Self {
@@ -23,23 +67,22 @@ impl ScrabbleBoard {
         }
     }
 
-    pub fn place_word(&mut self, word: &str, row: usize, col: usize, horizontal: bool) -> bool {
-        if self.is_valid_move(word, row, col, horizontal) {
-            for (i, str_char) in word.chars().enumerate() {
-                let (r, c) = if horizontal {
-                    (row, col + i)
-                } else {
-                    (row + i, col)
-                };
-                self.board[r][c] = str_char;
-            }
-            true
-        } else {
-            false
+    pub fn place_word(&mut self, word: &str, row: usize, col: usize, horizontal: bool) {
+        for (i, str_char) in word.chars().enumerate() {
+            let (r, c) = if horizontal {
+                (row, col + i)
+            } else {
+                (row + i, col)
+            };
+            self.board[r][c] = str_char;
         }
     }
 
     pub fn is_valid_move(&self, word: &str, row: usize, col: usize, horizontal: bool) -> bool {
+        if !self.valid_words.contains(word) {
+            return false;
+        }
+
         // Check if the word fits on the board
         if horizontal {
             if col + word.len() > 15 {
@@ -51,7 +94,7 @@ impl ScrabbleBoard {
             }
         }
 
-        // Make sure the spot on the board is empty and accomodates the word
+        // Make sure the spot on the board is empty and accommodates the word
         for (i, _str_char) in word.chars().enumerate() {
             let (r, c) = if horizontal {
                 (row, col + i)
@@ -91,8 +134,8 @@ impl ScrabbleBoard {
                     }
                     vertical_word.push(self.board[r_down][c]);
                 }
-                if vertical_word.len() > 1 {
-                    new_words.push(vertical_word);
+                if !vertical_word.is_empty() && !self.valid_words.contains(&vertical_word) {
+                    return false;
                 }
             } else {
                 // Check for horizontal words if placing vertically
@@ -113,8 +156,8 @@ impl ScrabbleBoard {
                     }
                     horizontal_word.push(self.board[r][c_right]);
                 }
-                if horizontal_word.len() > 1 {
-                    new_words.push(horizontal_word);
+                if !horizontal_word.is_empty() && !self.valid_words.contains(&horizontal_word) {
+                    return false;
                 }
             }
         }
