@@ -1,3 +1,5 @@
+use crate::utils::char_count_to_map;
+use std::collections::HashSet;
 use std::{fs::File, io::Read};
 
 pub struct ScrabbleBoard {
@@ -57,6 +59,12 @@ const SCORES: [u32; 91] = {
     ]
 };
 
+struct MoveConstraint {
+    prefix: Option<String>,
+    suffix: Option<String>,
+    gap: u32, // The space between the prefix and suffix, or the left/top of the board to the prefix, or the right/bottom of the board to the suffix
+}
+
 impl ScrabbleBoard {
     pub fn new() -> Self {
         let mut buf = String::new();
@@ -96,24 +104,26 @@ impl ScrabbleBoard {
         let mut score = 0;
         let mut word_multiplier = 1;
 
-        for (i, str_char) in word.chars().enumerate() {
-            let (r, c) = if horizontal {
-                (row, col + i)
-            } else {
-                (row + i, col)
-            };
-            let letter_score = SCORES[(str_char as u8) as usize];
-            match SCORE_MODIFIERS[r][c] {
-                ScoreModifier::None => score += letter_score,
-                ScoreModifier::DLS => score += letter_score * 2,
-                ScoreModifier::TLS => score += letter_score * 3,
-                ScoreModifier::DWS => {
-                    score += letter_score;
-                    word_multiplier *= 2;
-                }
-                ScoreModifier::TWS => {
-                    score += letter_score;
-                    word_multiplier *= 3;
+        if word.len() > 1 {
+            for (i, str_char) in word.chars().enumerate() {
+                let (r, c) = if horizontal {
+                    (row, col + i)
+                } else {
+                    (row + i, col)
+                };
+                let letter_score = SCORES[(str_char as u8) as usize];
+                match SCORE_MODIFIERS[r][c] {
+                    ScoreModifier::None => score += letter_score,
+                    ScoreModifier::DLS => score += letter_score * 2,
+                    ScoreModifier::TLS => score += letter_score * 3,
+                    ScoreModifier::DWS => {
+                        score += letter_score;
+                        word_multiplier *= 2;
+                    }
+                    ScoreModifier::TWS => {
+                        score += letter_score;
+                        word_multiplier *= 3;
+                    }
                 }
             }
         }
@@ -211,7 +221,7 @@ impl ScrabbleBoard {
                     extra_word_score += SCORES[self.board[r][c_right] as usize];
                 }
 
-                if word.len() > 1 {
+                if horizontal_word.len() > 1 {
                     score += extra_word_score * extra_word_multiplier;
                 }
             }
@@ -307,9 +317,51 @@ impl ScrabbleBoard {
 
         true
     }
+
+    pub fn get_possible_words_from_chars(
+        &self,
+        chars: &str,
+        constraint: Option<MoveConstraint>,
+    ) -> Vec<String> {
+        let mut result = Vec::new();
+
+        let chars_set = char_count_to_map(chars);
+        for valid_word in self.valid_words.iter() {
+            if constraint.as_ref().is_some()
+                && (constraint.as_ref().unwrap().prefix.is_some()
+                    && !valid_word
+                        .starts_with(constraint.as_ref().unwrap().prefix.as_ref().unwrap()))
+                || (constraint.as_ref().unwrap().suffix.is_some()
+                    && !valid_word.ends_with(constraint.as_ref().unwrap().suffix.as_ref().unwrap()))
+            {
+                continue;
+            }
+
+            // If we got here, then the prefix and suffix are satisfied. If either are specified, then the user could potentially put down tiles that don't form a word by themselves, but extend another word.
+
+            // Valid words that have characters not in the player's char set are disqualified.
+            if valid_word.chars().any(|x| !chars_set.contains_key(&x)) {
+                continue;
+            }
+
+            // Is the letters of this word a subset of the chars argument?
+            let valid_word_count_map = char_count_to_map(valid_word);
+            if valid_word_count_map
+                .iter()
+                .any(|(valid_word_char, valid_word_char_count)| {
+                    valid_word_char_count > &chars_set[valid_word_char]
+                })
+            {
+                continue;
+            }
+
+            result.push(valid_word.clone());
+        }
+
+        result
+    }
 }
 
-// Some tests
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,7 +417,6 @@ mod tests {
         board.place_word("METER", 5, 6, true);
         board.place_word("SPEED", 0, 5, false);
         board.place_word("METER", 6, 5, false);
-        board.dump();
         assert!(board.is_valid_move("O", 5, 5, true));
     }
 
@@ -387,5 +438,16 @@ mod tests {
         // E (1) + D (2) == 3
         // Total == 32
         assert_eq!(board.get_move_score("HAD", 1, 0, true), 32);
+    }
+
+    #[test]
+    fn test_single_letter_forms_long_word() {
+        let mut board = ScrabbleBoard::new();
+        board.place_word("SPEED", 0, 0, true);
+        board.place_word("METER", 0, 6, true);
+
+        // S (1) + P (3) + E (1) + E (1) + D (2) + O (1) + M (3) + E (1) + T (1) + E (1) + R (1) == 16
+
+        assert_eq!(board.get_move_score("O", 0, 5, true), 16);
     }
 }
