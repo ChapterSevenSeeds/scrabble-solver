@@ -59,12 +59,6 @@ const SCORES: [u32; 91] = {
     ]
 };
 
-struct MoveConstraint {
-    prefix: Option<String>,
-    suffix: Option<String>,
-    gap: u32, // The space between the prefix and suffix, or the left/top of the board to the prefix, or the right/bottom of the board to the suffix
-}
-
 impl ScrabbleBoard {
     pub fn new() -> Self {
         let mut buf = String::new();
@@ -321,30 +315,142 @@ impl ScrabbleBoard {
     pub fn get_possible_words_from_chars(
         &self,
         chars: &str,
-        constraint: Option<MoveConstraint>,
+        row: usize,
+        col: usize,
+        horizontal: bool,
+        exact_tiles_to_play: usize,
     ) -> Vec<String> {
-        let mut result = Vec::new();
+        if self.board[row][col] != ' ' {
+            return Vec::new();
+        }
 
-        let chars_set = char_count_to_map(chars);
-        for valid_word in self.valid_words.iter() {
-            if constraint.as_ref().is_some()
-                && (constraint.as_ref().unwrap().prefix.is_some()
-                    && !valid_word
-                        .starts_with(constraint.as_ref().unwrap().prefix.as_ref().unwrap()))
-                || (constraint.as_ref().unwrap().suffix.is_some()
-                    && !valid_word.ends_with(constraint.as_ref().unwrap().suffix.as_ref().unwrap()))
-            {
-                continue;
+        if horizontal {
+            for column_offset in 0..exact_tiles_to_play {
+                if col + column_offset > 14 || self.board[row][col + column_offset] != ' ' {
+                    return Vec::new();
+                }
+            }
+        } else {
+            for row_offset in 0..exact_tiles_to_play {
+                if row + row_offset > 14 || self.board[row + row_offset][col] != ' ' {
+                    return Vec::new();
+                }
+            }
+        }
+
+        let mut prefix_requirement = Vec::new();
+        if col > 0 {
+            for c_left in (0..col).rev() {
+                if self.board[row][c_left] == ' ' {
+                    break;
+                }
+                prefix_requirement.insert(0, self.board[row][c_left]);
+            }
+        }
+
+        let mut suffix_requirement = Vec::new();
+        if col + exact_tiles_to_play <= 14 {
+            for c_right in col + exact_tiles_to_play..14 {
+                if self.board[row][c_right] == ' ' {
+                    break;
+                }
+                suffix_requirement.push(self.board[row][c_right]);
+            }
+        }
+
+        if !prefix_requirement.is_empty() || !suffix_requirement.is_empty() {
+            // New tiles will touch a previously placed word. We will just try to extend those.
+
+            if !prefix_requirement.is_empty() && !suffix_requirement.is_empty() {
+                // Our tiles must fill a gap. Find those.
+                let prefix_requirement_str = String::from_iter(&prefix_requirement);
+                let suffix_requirement_str = String::from_iter(&suffix_requirement);
+                let player_chars = char_count_to_map(chars);
+                let mut possible_words = Vec::new();
+
+                for valid_word in self.valid_words.iter().filter(|word| {
+                    word.len()
+                        == prefix_requirement_str.len()
+                            + suffix_requirement_str.len()
+                            + exact_tiles_to_play
+                        && word.starts_with(&prefix_requirement_str)
+                        && word.ends_with(&suffix_requirement_str)
+                }) {
+                    let middle_chars = &valid_word[prefix_requirement_str.len()
+                        ..valid_word.len() - suffix_requirement_str.len()];
+                    let valid_word_leftover_chars = char_count_to_map(middle_chars);
+
+                    if valid_word_leftover_chars.iter().all(|(char, count)| {
+                        player_chars.contains_key(&char) && player_chars[char] >= *count
+                    }) {
+                        possible_words.push(middle_chars.to_string());
+                    }
+                }
+
+                return possible_words;
             }
 
-            // If we got here, then the prefix and suffix are satisfied. If either are specified, then the user could potentially put down tiles that don't form a word by themselves, but extend another word.
+            if !prefix_requirement.is_empty() {
+                let prefix_requirement_str = String::from_iter(&prefix_requirement);
+                let player_chars = char_count_to_map(chars);
+                let mut possible_words = Vec::new();
 
+                for valid_word in self.valid_words.iter().filter(|word| {
+                    word.len() == prefix_requirement_str.len() + exact_tiles_to_play
+                        && word.starts_with(&prefix_requirement_str)
+                }) {
+                    let suffix_chars = &valid_word[prefix_requirement_str.len()..];
+                    let valid_word_leftover_chars = char_count_to_map(suffix_chars);
+
+                    if valid_word_leftover_chars.iter().all(|(char, count)| {
+                        player_chars.contains_key(char) && player_chars[char] >= *count
+                    }) {
+                        possible_words.push(suffix_chars.to_string());
+                    }
+                }
+
+                return possible_words;
+            }
+
+            if !suffix_requirement.is_empty() {
+                let suffix_requirement_str = String::from_iter(&suffix_requirement);
+                let player_chars = char_count_to_map(chars);
+                let mut possible_words = Vec::new();
+
+                for valid_word in self.valid_words.iter().filter(|word| {
+                    word.len() == suffix_requirement_str.len() + exact_tiles_to_play
+                        && word.ends_with(&suffix_requirement_str)
+                }) {
+                    let prefix_chars =
+                        &valid_word[..valid_word.len() - suffix_requirement_str.len()];
+                    let valid_word_leftover_chars = char_count_to_map(prefix_chars);
+
+                    if valid_word_leftover_chars.iter().all(|(char, count)| {
+                        player_chars.contains_key(char) && player_chars[char] >= *count
+                    }) {
+                        possible_words.push(prefix_chars.to_string());
+                    }
+                }
+
+                return possible_words;
+            }
+
+            // This spot should be impossible
+        }
+
+        let mut possible_words = Vec::new();
+        let chars_set = char_count_to_map(chars);
+        for valid_word in self
+            .valid_words
+            .iter()
+            .filter(|word| word.len() == exact_tiles_to_play)
+        {
             // Valid words that have characters not in the player's char set are disqualified.
             if valid_word.chars().any(|x| !chars_set.contains_key(&x)) {
                 continue;
             }
 
-            // Is the letters of this word a subset of the chars argument?
+            // Are the letters of this word a subset of the chars argument?
             let valid_word_count_map = char_count_to_map(valid_word);
             if valid_word_count_map
                 .iter()
@@ -355,10 +461,28 @@ impl ScrabbleBoard {
                 continue;
             }
 
-            result.push(valid_word.clone());
+            possible_words.push(valid_word.clone());
         }
 
-        result
+        return possible_words;
+    }
+
+    pub fn get_moves(
+        &self,
+        chars: &str,
+        row: usize,
+        col: usize,
+        horizontal: bool,
+        max_tiles_to_play: usize,
+    ) -> Vec<String> {
+        let mut result: Vec<String> = Vec::new();
+        for tiles in 1..=max_tiles_to_play {
+            result.append(
+                &mut self.get_possible_words_from_chars(chars, row, col, horizontal, tiles),
+            );
+        }
+
+        return result;
     }
 }
 

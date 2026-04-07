@@ -4,7 +4,9 @@ pub mod utils;
 fn main() {
     let mut board = board::ScrabbleBoard::new();
     let mut timer = stopwatch::Stopwatch::start_new();
-    let possible_words = board.get_possible_words_from_chars("AOS", None, None);
+    board.place_word("SPEED", 0, 0, true);
+    board.place_word("METER", 0, 6, true);
+    let possible_words = board.get_moves("ASDFOIADDPEROG", 0, 5, true, 10);
     timer.stop();
     println!("{:?}, {}", possible_words, timer);
 }
