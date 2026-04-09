@@ -1,8 +1,7 @@
 use crate::utils::char_count_to_map;
 use regex::Regex;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::io::BufRead;
-use std::{fs::File, io::Read};
+use std::fmt::Debug;
 
 pub struct ScrabbleBoard {
     board: [[char; 15]; 15],
@@ -61,25 +60,27 @@ const SCORES: [u32; 91] = {
     ]
 };
 
-#[derive(Clone, Copy, Debug)]
-struct TilePlacement {
+#[derive(Clone, Copy)]
+pub struct TilePlacement {
     coords: (usize, usize),
-    tile: char,
+    pub(crate) tile: char,
+}
+
+impl Debug for TilePlacement {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}: {:?}", self.coords, self.tile)
+    }
 }
 
 #[derive(Clone, Debug)]
 pub struct PossibleMove {
-    tiles: Vec<TilePlacement>,
-    score: u32,
+    pub(crate) tiles: Vec<TilePlacement>,
+    pub(crate) score: u32,
 }
 
 impl ScrabbleBoard {
     pub fn new() -> Self {
-        let mut buf = String::new();
-        File::open("words.txt")
-            .expect("Failed to open config file")
-            .read_to_string(&mut buf)
-            .expect("Failed to read config file");
+        let buf = include_str!("words.txt");
         let words = buf
             .lines()
             .map(|line| line.trim().to_string())
@@ -123,6 +124,12 @@ impl ScrabbleBoard {
         }
     }
 
+    pub fn place_tiles(&mut self, tiles: &Vec<TilePlacement>) {
+        for placement in tiles {
+            self.board[placement.coords.0][placement.coords.1] = placement.tile;
+        }
+    }
+
     pub fn get_move_score(
         &self,
         tile_placements: &Vec<TilePlacement>,
@@ -158,7 +165,7 @@ impl ScrabbleBoard {
 
             // Then go forwards
             for new_col in *all_columns.first().unwrap()..15 {
-                if tiles_placed >= tile_placements.len() {
+                if self.board[row][new_col] == ' ' && tiles_placed >= tile_placements.len() {
                     break;
                 }
 
@@ -207,7 +214,7 @@ impl ScrabbleBoard {
 
             // Then go forwards
             for new_row in *all_rows.first().unwrap()..15 {
-                if tiles_placed >= tile_placements.len() {
+                if self.board[new_row][col] == ' ' && tiles_placed >= tile_placements.len() {
                     break;
                 }
 
@@ -268,6 +275,11 @@ impl ScrabbleBoard {
             }
         }
 
+        // Playing 7 tiles all at once is an extra 50 points
+        if tile_placements.len() == 7 {
+            return Some(score + 50);
+        }
+
         Some(score)
     }
 
@@ -288,7 +300,7 @@ impl ScrabbleBoard {
         // Then, iterate forwards up until we would have potentially placed all our tiles.
 
         // This represents either the row or the column where our word starts (if we are placing a new word or if we are extending another word).
-        let mut candidate_word_start_position: usize = 0;
+        let mut candidate_word_start_position: usize = if horizontal { col } else { row };
         let mut possible_tile_placements: Vec<TilePlacement> = Vec::new();
         let mut tiles_remaining = exact_tiles_to_play;
         let mut regex_str = String::from("^");
@@ -404,6 +416,8 @@ impl ScrabbleBoard {
                 continue;
             }
 
+            possible_move.score = move_score.unwrap();
+
             possible_moves.push(possible_move);
         }
 
@@ -416,10 +430,9 @@ impl ScrabbleBoard {
         row: usize,
         col: usize,
         horizontal: bool,
-        max_tiles_to_play: usize,
     ) -> Vec<PossibleMove> {
         let mut result: Vec<PossibleMove> = Vec::new();
-        for tiles in 1..=max_tiles_to_play {
+        for tiles in 1..=chars.len() {
             result.append(
                 &mut self.get_moves_from_spot_exact_length(chars, row, col, horizontal, tiles),
             );
@@ -428,51 +441,157 @@ impl ScrabbleBoard {
         return result;
     }
 
-    // pub fn get_moves(&self, chars: &str) -> Vec<PossibleMove> {
-    //     let mut result: Vec<PossibleMove> = Vec::new();
-    //
-    //     // First case: the middle tile is empty, meaning that we can place any word we want there.
-    //     if self.board[7][7] == ' ' {
-    //         // Because we will only have up to 7 chars, just find all possible horizontal words and duplicate those into vertical words.
-    //         for horizontal_word in self.get_moves_from_spot(chars, 7, 7, true, chars.len()) {
-    //             result.push(PossibleMove{
-    //                 coords: (7, 7),
-    //                 horizontal: true,
-    //                 chars: horizontal_word.clone(),
-    //                 score: self.get_move_score(&*horizontal_word, 7, 7, true)
-    //             });
-    //
-    //             result.push(PossibleMove{
-    //                 coords: (7, 7),
-    //                 horizontal: false,
-    //                 chars: horizontal_word.clone(),
-    //                 score: self.get_move_score(&*horizontal_word, 7, 7, false)
-    //             });
-    //         }
-    //
-    //         return result;
-    //     }
-    //
-    //     /*  If the middle tile is empty, then new moves must touch previous tiles. Do the following:
-    //         1. For horizontal, find all previously placed tiles that do not have a tile directly to the left or right.
-    //             For all tiles that do not have one directly to the left, iterate the empty spot leftwards up until 7
-    //      */
-    // }
+    fn get_moves_helper(&self, chars: &str) -> Vec<PossibleMove> {
+        let mut result: Vec<PossibleMove> = Vec::new();
+
+        // First case: the middle tile is empty, meaning that we can place any word we want there.
+        if self.board[7][7] == ' ' {
+            // Because we will only have up to 7 chars, just find all possible horizontal words and duplicate those into vertical words.
+            result.append(&mut self.get_moves_from_spot(chars, 7, 7, true));
+            result.append(&mut self.get_moves_from_spot(chars, 7, 7, false));
+
+            result.sort_by(|a, b| b.score.cmp(&a.score));
+            return result;
+        }
+
+        /*  If the middle tile is empty, then new moves must touch previous tiles. Do the following:
+           1. For horizontal, find all previously placed tiles that do not have a tile directly to the left or right.
+               For all tiles that do not have one directly to the left, iterate the empty spot leftwards up until the tile count.
+           2. For vertical, do the same thing but for up and down.
+        */
+
+        // First, horizontal.
+        let mut horizontal_coords_to_check: HashSet<(usize, usize, Option<usize>)> = HashSet::new(); // (row, column, required length)
+        for row in 0..15 {
+            for column in 1..14 {
+                if self.board[row][column] == ' ' {
+                    continue;
+                }
+
+                // Iterate to the left
+                for column_to_left in (0..column - 1).rev() {
+                    if self.board[row][column_to_left] != ' '
+                        || column - column_to_left > chars.len()
+                    {
+                        break;
+                    }
+
+                    horizontal_coords_to_check.insert((
+                        row,
+                        column_to_left,
+                        Some(column - column_to_left),
+                    ));
+                }
+
+                // Grab one to the right
+                if self.board[row][column + 1] == ' ' {
+                    horizontal_coords_to_check.insert((row, column + 1, None));
+                }
+            }
+        }
+
+        // Next, vertical.
+        let mut vertical_coords_to_check: HashSet<(usize, usize, Option<usize>)> = HashSet::new();
+        for row in 1..14 {
+            for column in 0..15 {
+                if self.board[row][column] == ' ' {
+                    continue;
+                }
+
+                // Iterate upwards
+                for row_above in (0..row - 1).rev() {
+                    if self.board[row_above][column] != ' ' || row - row_above > chars.len() {
+                        break;
+                    }
+
+                    vertical_coords_to_check.insert((row_above, column, Some(row - row_above)));
+                }
+
+                // Grab one downward
+                if self.board[row + 1][column] == ' ' {
+                    vertical_coords_to_check.insert((row + 1, column, None));
+                }
+            }
+        }
+
+        for (row, column, length) in horizontal_coords_to_check {
+            if length.is_some() {
+                result.append(&mut self.get_moves_from_spot_exact_length(
+                    chars,
+                    row,
+                    column,
+                    true,
+                    length.unwrap(),
+                ));
+            } else {
+                result.append(&mut self.get_moves_from_spot(chars, row, column, true));
+            }
+        }
+
+        for (row, column, length) in vertical_coords_to_check {
+            if length.is_some() {
+                result.append(&mut self.get_moves_from_spot_exact_length(
+                    chars,
+                    row,
+                    column,
+                    false,
+                    length.unwrap(),
+                ));
+            } else {
+                result.append(&mut self.get_moves_from_spot(chars, row, column, false));
+            }
+        }
+
+        return result;
+    }
+
+    pub fn get_moves(&self, chars: &str) -> Vec<PossibleMove> {
+        let mut result: Vec<PossibleMove> = self.get_moves_helper(chars);
+        result.sort_by(|a, b| b.score.cmp(&a.score));
+        return result;
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    fn to_tiles(word: &str, row: usize, col: usize, horizontal: bool) -> Vec<TilePlacement> {
+        let mut result: Vec<TilePlacement> = Vec::new();
+        for (i, str_char) in word.chars().enumerate() {
+            let (new_row, new_col) = if horizontal {
+                (row, col + i)
+            } else {
+                (row + i, col)
+            };
+            result.push(TilePlacement {
+                tile: str_char,
+                coords: (new_row, new_col),
+            });
+        }
+
+        return result;
+    }
     use super::*;
     #[test]
     fn test_basic_valid_move() {
         let board = ScrabbleBoard::new();
-        assert!(board.is_valid_move("HELLO", 7, 7, true));
+
+        // H (4, TWS) + E (1) + L (1) + L (2, DLS) + O (1) == 27
+        assert_eq!(
+            board
+                .get_move_score(&to_tiles("HELLO", 0, 0, true), true, true)
+                .unwrap(),
+            27
+        );
     }
 
     #[test]
     fn test_invalid_move_out_of_bounds() {
         let board = ScrabbleBoard::new();
-        assert!(!board.is_valid_move("HELLO", 7, 12, true));
+        assert!(
+            board
+                .get_move_score(&to_tiles("HELLO", 0, 12, true), true, true)
+                .is_none()
+        );
     }
 
     #[test]
@@ -481,7 +600,11 @@ mod tests {
         // Place HELLO at (7,7) horizontally
         board.place_word("HELLO", 7, 7, true);
         // Now try to place WORLD overlapping with O in HELLO
-        assert!(!board.is_valid_move("WORLD", 6, 9, false));
+        assert!(
+            !board
+                .get_move_score(&to_tiles("WORLD", 5, 5, false), false, true)
+                .is_none()
+        );
     }
 
     #[test]
@@ -490,7 +613,17 @@ mod tests {
         // Place SCRAP at the top left horizontally
         board.place_word("SHELL", 0, 0, true);
         // Now place HAD vertically starting at (0,2) which would create the words "SH", "HA", and "ED"
-        assert!(board.is_valid_move("HAD", 1, 0, true));
+
+        // H (4) + A (1, DWS) + D (2) == 14
+        // S (1) + H(4) == 5
+        // H (4) + A (1, DWS) == 10
+        // E (1) + D (2) == 3
+        assert_eq!(
+            board
+                .get_move_score(&to_tiles("HAD", 1, 0, true), true, true)
+                .unwrap(),
+            32
+        );
     }
 
     #[test]
@@ -498,16 +631,26 @@ mod tests {
         let mut board = ScrabbleBoard::new();
         board.place_word("SPEED", 0, 0, true);
         board.place_word("METER", 0, 6, true);
-        assert!(board.is_valid_move("O", 0, 5, true));
+
+        // S (1) + P (3) + E (1) + E (1) + D (2) + O (1) + M (3) + E (1) + T (1) + E (1) + R (1) == 16
+        assert_eq!(
+            board
+                .get_move_score(&to_tiles("O", 0, 5, true), true, true)
+                .unwrap(),
+            16
+        );
     }
 
     #[test]
     fn test_vertical_letter_forms_invalid_vertical_word() {
         let mut board = ScrabbleBoard::new();
         board.place_word("FETCH", 0, 0, true);
-        assert!(!board.is_valid_move("F", 1, 0, false));
+        assert!(
+            board
+                .get_move_score(&to_tiles("F", 1, 0, false), false, true)
+                .is_none()
+        );
     }
-
     #[test]
     fn test_single_letter_forms_words_in_both_directions() {
         let mut board = ScrabbleBoard::new();
@@ -515,37 +658,65 @@ mod tests {
         board.place_word("METER", 5, 6, true);
         board.place_word("SPEED", 0, 5, false);
         board.place_word("METER", 6, 5, false);
-        assert!(board.is_valid_move("O", 5, 5, true));
+
+        // TLS twice on the O == 18 for both == 36
+        assert_eq!(
+            board
+                .get_move_score(&to_tiles("O", 5, 5, true), true, true)
+                .unwrap(),
+            36
+        );
     }
 
     #[test]
     fn test_simple_score() {
         let board = ScrabbleBoard::new();
-        assert_eq!(board.get_move_score("SPEED", 0, 0, true), 27)
+
         // S (1, TWS) + P (3) + E (1) + E (2, DLS) + D (2) == 27
+        assert_eq!(
+            board
+                .get_move_score(&to_tiles("SPEED", 0, 0, true), true, true)
+                .unwrap(),
+            27
+        );
     }
 
     #[test]
-    fn test_multiple_word_score() {
+    fn test_possible_moves_simple() {
         let mut board = ScrabbleBoard::new();
-        board.place_word("SHELL", 0, 0, true);
-        // Now place HAD vertically starting at (0,2) which would create the words "SH", "HA", and "ED"
-        // H (4) + A (1, DWS) + D (2) == 14
-        // S (1) + H (4) == 5
-        // H (4) + A (1, DWS) == 10
-        // E (1) + D (2) == 3
-        // Total == 32
-        assert_eq!(board.get_move_score("HAD", 1, 0, true), 32);
-    }
 
-    #[test]
-    fn test_single_letter_forms_long_word() {
-        let mut board = ScrabbleBoard::new();
         board.place_word("SPEED", 0, 0, true);
-        board.place_word("METER", 0, 6, true);
+        let possible_words = board.get_moves_from_spot("AFOOI", 1, 0, true);
 
-        // S (1) + P (3) + E (1) + E (1) + D (2) + O (1) + M (3) + E (1) + T (1) + E (1) + R (1) == 16
+        // Two words from (1, 0) horizontally: OI and OAF.
 
-        assert_eq!(board.get_move_score("O", 0, 5, true), 16);
+        let short_word = possible_words.iter().find(|x| x.tiles.len() == 2).unwrap();
+        // First, OI which also forms SO and PI.
+        // O (1) + I (1, DWS) == 4
+        // S (1) + O (1) == 2
+        // P (3) + I (1, DWS) == 8
+        // Total == 14
+        assert_eq!(short_word.tiles.len(), 2);
+        assert_eq!(short_word.tiles[0].coords, (1, 0));
+        assert_eq!(short_word.tiles[0].tile, 'O');
+        assert_eq!(short_word.tiles[1].coords, (1, 1));
+        assert_eq!(short_word.tiles[1].tile, 'I');
+        assert_eq!(short_word.score, 14);
+
+        let long_word = possible_words.iter().find(|x| x.tiles.len() == 3).unwrap();
+        // Then, OAF which also forms SO, PA, and EF.
+        // O (1) + A (1, DWS) + F (4) == 12
+        // S (1) + O (1) == 2
+        // P (3) + A (1, DWS) == 8
+        // E (1) + F (4) == 5
+        // Total == 27
+        assert_eq!(long_word.tiles.len(), 3);
+        assert_eq!(long_word.tiles[0].coords, (1, 0));
+        assert_eq!(long_word.tiles[0].tile, 'O');
+        assert_eq!(long_word.tiles[1].coords, (1, 1));
+        assert_eq!(long_word.tiles[1].tile, 'A');
+        assert_eq!(long_word.tiles[2].coords, (1, 2));
+        assert_eq!(long_word.tiles[2].tile, 'F');
+        assert_eq!(long_word.score, 27);
     }
 }
