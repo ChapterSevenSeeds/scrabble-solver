@@ -1,0 +1,11 @@
+[package]
+name = "scrabble"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+regex = "1.12.3"
+rand = "0.10.0"
+
+[lib]
+crate-type = ["rlib"]

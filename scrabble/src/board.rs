@@ -1,9 +1,9 @@
-use crate::utils::char_count_to_map;
+use crate::utils::{char_count_to_map, encode_char, encode_chars, word_matches_bitmask};
 use regex::Regex;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Debug;
 
-pub struct ScrabbleBoard {
+pub struct ScrabbleGame {
     board: [[char; 15]; 15],
     pub valid_words: std::collections::HashSet<String>,
 }
@@ -60,10 +60,12 @@ const SCORES: [u32; 91] = {
     ]
 };
 
+type Coords = (usize, usize);
+
 #[derive(Clone, Copy)]
 pub struct TilePlacement {
-    coords: (usize, usize),
-    pub(crate) tile: char,
+    coords: Coords,
+    pub tile: char,
 }
 
 impl Debug for TilePlacement {
@@ -74,11 +76,67 @@ impl Debug for TilePlacement {
 
 #[derive(Clone, Debug)]
 pub struct PossibleMove {
-    pub(crate) tiles: Vec<TilePlacement>,
-    pub(crate) score: u32,
+    pub tiles: Vec<TilePlacement>,
+    pub score: u32,
 }
 
-impl ScrabbleBoard {
+type ScrabbleBoard = [[char; 15]; 15];
+
+struct ScrabbleBoardIterator<'a> {
+    horizontal: bool,
+    forwards: bool,
+    board: &'a ScrabbleBoard,
+
+    // So that we actually iterate over everything, we use i32 so that we can see if we go negative when going backwards.
+    current_coords: (i32, i32),
+}
+impl Iterator for ScrabbleBoardIterator<'_> {
+    type Item = (Coords, char);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current_coords = (
+            self.current_coords.0 as usize,
+            self.current_coords.1 as usize,
+        );
+        let current_char = self.board[current_coords.0][current_coords.1];
+
+        // Don't return None until we have gone past the end in either direction.
+
+        if self.horizontal {
+            if self.forwards {
+                if self.current_coords.1 > 14 {
+                    return None;
+                }
+
+                self.current_coords.1 += 1;
+            } else {
+                if self.current_coords.1 < 0 {
+                    return None;
+                }
+
+                self.current_coords.1 -= 1;
+            }
+        } else {
+            if self.forwards {
+                if self.current_coords.0 > 14 {
+                    return None;
+                }
+
+                self.current_coords.0 += 1;
+            } else {
+                if self.current_coords.0 < 0 {
+                    return None;
+                }
+
+                self.current_coords.0 -= 1;
+            }
+        }
+
+        Some((current_coords, current_char))
+    }
+}
+
+impl ScrabbleGame {
     pub fn new() -> Self {
         let buf = include_str!("words.txt");
         let words = buf
@@ -89,6 +147,20 @@ impl ScrabbleBoard {
         Self {
             board: [[' '; 15]; 15],
             valid_words: words.into_iter().collect(),
+        }
+    }
+
+    fn create_board_iterator(
+        &'_ self,
+        start_coords: (usize, usize),
+        horizontal: bool,
+        forwards: bool,
+    ) -> ScrabbleBoardIterator<'_> {
+        ScrabbleBoardIterator {
+            forwards,
+            current_coords: (start_coords.0 as i32, start_coords.1 as i32),
+            horizontal,
+            board: &self.board,
         }
     }
 
@@ -302,84 +374,64 @@ impl ScrabbleBoard {
         // Then, iterate forwards up until we would have potentially placed all our tiles.
 
         // This represents either the row or the column where our word starts (if we are placing a new word or if we are extending another word).
-        let mut candidate_word_start_position: usize = if horizontal { col } else { row };
-        let mut possible_tile_placements: Vec<TilePlacement> = Vec::new();
+        let mut candidate_word_start_position: Coords = (row, col);
+        // Coordinates where we would have to place tiles for our turn.
+        let mut possible_tile_placements: Vec<Coords> = Vec::new();
+        // Temporary to keep track of how many empty spots we have seen as we iterate along the board.
         let mut tiles_remaining = exact_tiles_to_play;
-        let mut regex_str = String::from("^");
-        if horizontal {
-            // Iterate backwards until we find the start of the word.
-            for new_col in (0..col).rev() {
-                if self.board[row][new_col] == ' ' {
-                    break;
-                }
+        // A vector of encoded char bitmasks to help in filtering the valid word list given some constraints (already placed tiles we encounter, the player's tile set, etc.).
+        let mut word_bitmask: Vec<u32> = Vec::new();
+        // The user's tiles encoded as a bitwise OR mask.
+        let user_tiles_bitmask = encode_chars(chars);
 
-                candidate_word_start_position = new_col;
-                regex_str.insert(1, self.board[row][new_col]);
+        // Iterate backwards until we find the start of the word.
+        let word_start_iter = self.create_board_iterator(
+            (row, col),
+            horizontal,
+            false, // backwards
+        );
+        for (new_coords, c) in word_start_iter {
+            if c == ' ' {
+                // If we encounter an empty spot, leave the loop.
+                break;
             }
 
-            // Then place as many tiles as we are allowed to
-            for new_col in col..15 {
-                if tiles_remaining == 0 && self.board[row][new_col] == ' ' {
-                    break;
-                }
+            // We found a previously placed tile. Record its position and insert it into the front of our word bitmask.
+            candidate_word_start_position = new_coords;
+            word_bitmask.insert(0, encode_char(c));
+        }
 
-                if self.board[row][new_col] == ' ' && tiles_remaining > 0 {
-                    regex_str.push_str(r"\w");
-                    tiles_remaining -= 1;
-                    possible_tile_placements.push(TilePlacement {
-                        coords: (row, new_col),
-                        tile: ' ',
-                    });
-                } else {
-                    regex_str.push(self.board[row][new_col]);
-                }
-            }
-        } else {
-            for new_row in (0..row).rev() {
-                if self.board[row][col] == ' ' {
-                    break;
-                }
+        // Then iterate forwards and place tiles as we go and encounter empty spots.
+        let rest_of_word_iter = self.create_board_iterator(
+            (row, col),
+            horizontal,
+            true, // forwards
+        );
 
-                candidate_word_start_position = new_row;
-                regex_str.insert(1, self.board[new_row][col]);
+        for (new_coords, c) in rest_of_word_iter {
+            // Out of tiles and need to place another? Break.
+            if tiles_remaining == 0 && c == ' ' {
+                break;
             }
 
-            regex_str.push_str(r"\w");
-            tiles_remaining -= 1;
-            possible_tile_placements.push(TilePlacement {
-                coords: (row, col),
-                tile: ' ',
-            });
-
-            for new_row in row + 1..15 {
-                if tiles_remaining == 0 && self.board[new_row][col] == ' ' {
-                    break;
-                }
-
-                if self.board[new_row][col] == ' ' && tiles_remaining > 0 {
-                    regex_str.push_str(r"\w");
-                    tiles_remaining -= 1;
-                    possible_tile_placements.push(TilePlacement {
-                        coords: (new_row, col),
-                        tile: ' ',
-                    });
-                } else {
-                    regex_str.push(self.board[new_row][col]);
-                }
+            // We still have tiles to place, and we need to place one here. Do so.
+            if c == ' ' && tiles_remaining > 0 {
+                word_bitmask.push(user_tiles_bitmask);
+                tiles_remaining -= 1;
+                possible_tile_placements.push(new_coords);
+            } else {
+                // This spot on the board already has a tile in it. We will add it to the bitmask so that we only consider words with that tile in that spot.
+                word_bitmask.push(encode_char(c));
             }
         }
 
-        // Then, mark the end of the string.
-        regex_str.push('$');
-        let candidate_regex = Regex::new(&*regex_str).unwrap();
-
         // Now go find candidates.
         let mut possible_moves: Vec<PossibleMove> = Vec::new();
-        let chars_set = char_count_to_map(chars);
+        let user_tile_counts_by_char = char_count_to_map(chars);
         for candidate_word in self
             .valid_words
             .iter()
-            .filter(|word| candidate_regex.is_match(word))
+            .filter(|word| word_matches_bitmask(word, &word_bitmask))
         {
             let mut possible_move = PossibleMove {
                 tiles: vec![],
@@ -391,39 +443,46 @@ impl ScrabbleBoard {
             // Grab all characters from this word that would need to come from our tiles.
             for potential_tile_placement in possible_tile_placements.iter() {
                 let tile_to_place = candidate_word.as_bytes()[if horizontal {
-                    potential_tile_placement.coords.1
+                    potential_tile_placement.1 - candidate_word_start_position.1
                 } else {
-                    potential_tile_placement.coords.0
-                } - candidate_word_start_position] as char;
+                    potential_tile_placement.0 - candidate_word_start_position.0
+                }] as char;
                 *required_tile_counts.entry(tile_to_place).or_insert(0) += 1;
 
-                let mut tile_placement_copy = potential_tile_placement.clone();
-                tile_placement_copy.tile = tile_to_place;
-                possible_move.tiles.push(tile_placement_copy);
+                possible_move.tiles.push(TilePlacement {
+                    coords: *potential_tile_placement,
+                    tile: tile_to_place,
+                });
             }
 
-            // Valid words that have characters not in the player's char set are disqualified.
-            // And, are the letters of this word a subset of the chars argument?
+            // Loop through the required tiles in order to form this new word.
             if required_tile_counts.iter().any(
                 |(candidate_word_char, candidate_word_char_count)| {
-                    !chars_set.contains_key(candidate_word_char)
-                        || candidate_word_char_count > &chars_set[candidate_word_char]
+                    // Are there any that the player doesn't have in their set?
+                    !user_tile_counts_by_char.contains_key(candidate_word_char)
+                        // Or are there any that the user doesn't have enough of?
+                        || candidate_word_char_count > &user_tile_counts_by_char[candidate_word_char]
                 },
             ) {
+                // If so, this word can't be played with the players tiles.
                 continue;
             }
 
+            // If we got here, then the user can play the word. Now we will go calculate the score for this play.
             let move_score = self.get_move_score(&possible_move.tiles, horizontal, true);
             if move_score.is_none() {
+                // If we didn't get a score, then there is an invalid word formed by one of the player's tile placements.
+                // TODO: Refactor scoring into this method.
                 continue;
             }
 
+            // We have a score. The play is valid.
             possible_move.score = move_score.unwrap();
 
             possible_moves.push(possible_move);
         }
 
-        return possible_moves;
+        possible_moves
     }
 
     pub fn get_moves_from_spot(
@@ -448,11 +507,9 @@ impl ScrabbleBoard {
 
         // First case: the middle tile is empty, meaning that we can place any word we want there.
         if self.board[7][7] == ' ' {
-            // Because we will only have up to 7 chars, just find all possible horizontal words and duplicate those into vertical words.
             result.append(&mut self.get_moves_from_spot(chars, 7, 7, true));
             result.append(&mut self.get_moves_from_spot(chars, 7, 7, false));
 
-            result.sort_by(|a, b| b.score.cmp(&a.score));
             return result;
         }
 
@@ -549,8 +606,9 @@ impl ScrabbleBoard {
 
     pub fn get_moves(&self, chars: &str) -> Vec<PossibleMove> {
         let mut result: Vec<PossibleMove> = self.get_moves_helper(chars);
+        // Sort by score descending.
         result.sort_by(|a, b| b.score.cmp(&a.score));
-        return result;
+        result
     }
 }
 
@@ -575,7 +633,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_basic_valid_move() {
-        let board = ScrabbleBoard::new();
+        let board = ScrabbleGame::new();
 
         // H (4, TWS) + E (1) + L (1) + L (2, DLS) + O (1) == 27
         assert_eq!(
@@ -588,7 +646,7 @@ mod tests {
 
     #[test]
     fn test_invalid_move_out_of_bounds() {
-        let board = ScrabbleBoard::new();
+        let board = ScrabbleGame::new();
         assert!(
             board
                 .get_move_score(&to_tiles("HELLO", 0, 12, true), true, true)
@@ -598,7 +656,7 @@ mod tests {
 
     #[test]
     fn test_invalid_move_overlapping() {
-        let mut board = ScrabbleBoard::new();
+        let mut board = ScrabbleGame::new();
         // Place HELLO at (7,7) horizontally
         board.place_word("HELLO", 7, 7, true);
         // Now try to place WORLD overlapping with O in HELLO
@@ -611,7 +669,7 @@ mod tests {
 
     #[test]
     fn test_valid_move_with_new_words() {
-        let mut board = ScrabbleBoard::new();
+        let mut board = ScrabbleGame::new();
         // Place SCRAP at the top left horizontally
         board.place_word("SHELL", 0, 0, true);
         // Now place HAD vertically starting at (0,2) which would create the words "SH", "HA", and "ED"
@@ -630,7 +688,7 @@ mod tests {
 
     #[test]
     fn test_letter_placement_forms_word_both_directions() {
-        let mut board = ScrabbleBoard::new();
+        let mut board = ScrabbleGame::new();
         board.place_word("SPEED", 0, 0, true);
         board.place_word("METER", 0, 6, true);
 
@@ -645,7 +703,7 @@ mod tests {
 
     #[test]
     fn test_vertical_letter_forms_invalid_vertical_word() {
-        let mut board = ScrabbleBoard::new();
+        let mut board = ScrabbleGame::new();
         board.place_word("FETCH", 0, 0, true);
         assert!(
             board
@@ -655,7 +713,7 @@ mod tests {
     }
     #[test]
     fn test_single_letter_forms_words_in_both_directions() {
-        let mut board = ScrabbleBoard::new();
+        let mut board = ScrabbleGame::new();
         board.place_word("SPEED", 5, 0, true);
         board.place_word("METER", 5, 6, true);
         board.place_word("SPEED", 0, 5, false);
@@ -672,7 +730,7 @@ mod tests {
 
     #[test]
     fn test_simple_score() {
-        let board = ScrabbleBoard::new();
+        let board = ScrabbleGame::new();
 
         // S (1, TWS) + P (3) + E (1) + E (2, DLS) + D (2) == 27
         assert_eq!(
@@ -685,7 +743,7 @@ mod tests {
 
     #[test]
     fn test_possible_moves_simple() {
-        let mut board = ScrabbleBoard::new();
+        let mut board = ScrabbleGame::new();
 
         board.place_word("SPEED", 0, 0, true);
         let possible_words = board.get_moves_from_spot("AFOOI", 1, 0, true);
