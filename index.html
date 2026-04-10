@@ -1,10 +1,6 @@
 <script type="module">
-    const response = await fetch("target/wasm32-wasip1/debug/scrabble-solver.wasm");
-    const bytes = await response.arrayBuffer();
+    import init, { run } from "./pkg/scrabble_solver.js";
 
-    const { instance } = await WebAssembly.instantiate(bytes, {
-        // imports go here if needed
-    });
-
-    instance.exports.your_function();
+    await init();
+    run();
 </script>

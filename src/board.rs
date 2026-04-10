@@ -107,10 +107,12 @@ impl ScrabbleBoard {
         board
     }
 
-    pub fn dump(&self) {
+    pub fn dump(&self) -> String {
+        let mut buf = String::new();
         for row in self.board {
-            println!("{:?}", row)
+            buf.push_str(&*format!("{:?}\n", row));
         }
+        return buf;
     }
 
     pub fn place_word(&mut self, word: &str, row: usize, col: usize, horizontal: bool) {

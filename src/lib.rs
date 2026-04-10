@@ -1,10 +1,12 @@
 mod board;
+use wasm_bindgen::prelude::*;
 pub mod tile_bag;
 pub mod utils;
 
 use crate::tile_bag::TileBag;
 
-fn main() {
+#[wasm_bindgen]
+pub fn run() {
     let mut board = board::ScrabbleBoard::new();
     let mut tile_bag = TileBag::new();
     let mut player_tiles = tile_bag.take(7);
@@ -22,6 +24,7 @@ fn main() {
         player_tiles.push_str(&*tile_bag.take(7 - player_tiles.len()));
 
         // println!("{}, {}", timer, score);
-        board.dump();
+        let board_str = board.dump();
+        web_sys::console::log_1(&board_str.into());
     }
 }
