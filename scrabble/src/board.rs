@@ -1,10 +1,16 @@
-use crate::utils::{char_count_to_map, encode_char, encode_chars, word_matches_bitmask};
+use crate::utils::{
+    bitmasks_match, char_count_to_map, convert_chars_to_bit_vec, encode_char, encode_chars,
+};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
+type ScrabbleBoard = [[char; 15]; 15];
+
 pub struct ScrabbleGame {
-    board: [[char; 15]; 15],
+    board: ScrabbleBoard,
     pub valid_words: HashSet<String>,
+    /// HashMap<length, Vec<(word, word bitmask)>>
+    pub valid_words_bitmasks_by_length: HashMap<usize, Vec<(String, Vec<u32>)>>,
 }
 
 enum ScoreModifier {
@@ -78,8 +84,6 @@ pub struct PossibleMove {
     pub tiles: Vec<TilePlacement>,
     pub score: u32,
 }
-
-type ScrabbleBoard = [[char; 15]; 15];
 
 struct ScrabbleBoardIterator<'a> {
     horizontal: bool,
@@ -171,7 +175,16 @@ impl ScrabbleGame {
 
         Self {
             board: [[' '; 15]; 15],
-            valid_words: words.into_iter().collect(),
+            valid_words: words.clone().into_iter().collect(),
+            valid_words_bitmasks_by_length: words.into_iter().fold(
+                HashMap::new(),
+                |mut acc, word| {
+                    acc.entry(word.len())
+                        .or_insert(Vec::new())
+                        .push((word.clone(), convert_chars_to_bit_vec(&word)));
+                    acc
+                },
+            ),
         }
     }
 
@@ -351,10 +364,19 @@ impl ScrabbleGame {
         // Now go find candidates.
         let mut possible_moves: Vec<PossibleMove> = Vec::new();
         let user_tile_counts_by_char = char_count_to_map(chars);
-        'candidate_word_main_loop: for candidate_word in self
-            .valid_words
-            .iter()
-            .filter(|word| word_matches_bitmask(word, &word_bitmask))
+        if !self
+            .valid_words_bitmasks_by_length
+            .contains_key(&word_bitmask.len())
+        {
+            // If there are no words that match our required length, then exit early.
+            return Vec::new();
+        }
+
+        'candidate_word_main_loop: for candidate_word in (&self.valid_words_bitmasks_by_length
+            [&word_bitmask.len()])
+            .into_iter()
+            .filter(|(_, bitmask_vec)| bitmasks_match(&bitmask_vec, &word_bitmask))
+            .map(|(word, _)| word)
         {
             let mut possible_move = PossibleMove {
                 tiles: vec![],

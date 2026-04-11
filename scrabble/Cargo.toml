@@ -7,5 +7,6 @@ edition = "2024"
 regex = "1.12.3"
 rand = "0.10.0"
 
+
 [lib]
 crate-type = ["rlib"]
