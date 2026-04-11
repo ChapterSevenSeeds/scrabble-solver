@@ -6,4 +6,3 @@ edition = "2024"
 [dependencies]
 scrabble = { path = "../scrabble" }
 stopwatch = "0.0.7"
-regex = "1.12.3"
