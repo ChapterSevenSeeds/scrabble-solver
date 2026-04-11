@@ -1,25 +1,16 @@
-use scrabble::board::ScrabbleGame;
-use scrabble::tile_bag::TileBag;
+use scrabble::game::ScrabbleGame;
 
 pub fn main() {
-    let mut board = ScrabbleGame::new();
-    let mut tile_bag = TileBag::new();
-    let mut player_tiles = tile_bag.take(7);
-    let mut score = 0;
+    let mut board = ScrabbleGame::new(4);
 
     loop {
-        let mut timer = stopwatch::Stopwatch::start_new();
-        let possible_words = board.get_moves(&*player_tiles);
-        timer.stop();
-        board.place_tiles(&possible_words[0].tiles);
-        score += possible_words[0].score;
-        for tile in &possible_words[0].tiles {
-            player_tiles.remove(player_tiles.find(tile.tile).unwrap());
+        if board.winner.is_some() {
+            println!("Winner: {:?}", board.winner.unwrap() + 1);
+            break;
         }
-        player_tiles.push_str(&*tile_bag.take(7 - player_tiles.len()));
 
-        println!("{}, {}", timer, score);
-        let board_str = board.dump();
-        println!("{}", board_str);
+        let possible_moves = board.get_moves();
+        board.make_turn(possible_moves[0].clone());
+        println!("{:?}", board);
     }
 }

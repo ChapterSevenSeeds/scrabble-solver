@@ -1,4 +1,4 @@
-use scrabble::board::ScrabbleGame;
+use scrabble::game::ScrabbleGame;
 use scrabble::tile_bag::TileBag;
 use wasm_bindgen::prelude::*;
 
