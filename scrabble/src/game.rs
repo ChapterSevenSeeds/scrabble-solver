@@ -1,12 +1,14 @@
 use crate::board::ScrabbleBoard;
 use crate::board_iterator::ScrabbleBoardIterator;
 use crate::common::{
-    Coords, Player, PossibleMove, SCORE_MODIFIERS, SCORES, ScoreModifier, TilePlacement,
+    Coords, EMPTY, Player, PossibleMove, SCORE_MODIFIERS, SCORES, ScoreModifier, TilePlacement,
+    WILD,
 };
 use crate::tile_bag::TileBag;
 use crate::utils::{
     bitmasks_match, char_count_to_map, convert_chars_to_bit_vec, encode_char, encode_chars,
 };
+use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 
@@ -70,7 +72,7 @@ impl ScrabbleGame {
         let mut board = Self::new(total_players);
         for (row, line) in board_str.lines().enumerate() {
             for (col, char) in line.chars().enumerate() {
-                if char == ' ' {
+                if char == EMPTY {
                     continue;
                 }
 
@@ -107,7 +109,19 @@ impl ScrabbleGame {
         }
     }
 
+    fn advance_turn(&mut self) {
+        if self.winner.is_some() {
+            return;
+        }
+
+        self.turn = (self.turn + 1) % self.total_players;
+    }
+
     pub fn make_turn(&mut self, turn: PossibleMove) {
+        if self.winner.is_some() {
+            return;
+        }
+
         self.place_tiles(&turn.tiles);
         *self.player_scores.entry(self.turn).or_insert(0) += turn.score as i32;
         self.bag.remove_and_replenish(self.turn, &turn.tiles);
@@ -116,7 +130,7 @@ impl ScrabbleGame {
             // The game is over.
             // Calculate scoring according to https://en.wikipedia.org/wiki/Scrabble#End_of_game
 
-            for player in (0..self.total_players) {
+            for player in 0..self.total_players {
                 let player_remaining_tiles_score = self
                     .bag
                     .get_tiles(player)
@@ -139,9 +153,29 @@ impl ScrabbleGame {
                     .unwrap()
                     .0,
             );
+
+            return;
         }
 
-        self.turn = (self.turn + 1) % self.total_players;
+        self.advance_turn();
+    }
+
+    pub fn can_exchange(&self) -> bool {
+        self.bag.get_tile_count() >= 7
+    }
+
+    pub fn exchange(&mut self, tiles: String) {
+        assert!(
+            self.can_exchange(),
+            "Not enough tiles in the bag to exchange"
+        );
+
+        self.bag.exchange(self.turn, tiles);
+        self.advance_turn();
+    }
+
+    pub fn pass(&mut self) {
+        self.advance_turn();
     }
 
     /// Collects all the tiles along a vector from a starting point and returns it as a string.
@@ -158,7 +192,7 @@ impl ScrabbleGame {
                 coords, horizontal, false, // backwards
             )
             .skip(1)
-            .take_while(|x| x.char_at_coords != ' ')
+            .take_while(|x| x.char_at_coords != EMPTY)
             .map(|x| x.char_at_coords)
             .collect::<String>()
             // Then we have to reverse it since we collected it backwards
@@ -174,7 +208,7 @@ impl ScrabbleGame {
             &*self
                 .create_board_iterator(coords, horizontal, true)
                 .skip(1)
-                .take_while(|x| x.char_at_coords != ' ')
+                .take_while(|x| x.char_at_coords != EMPTY)
                 .map(|x| x.char_at_coords)
                 .collect::<String>(),
         );
@@ -192,7 +226,7 @@ impl ScrabbleGame {
         exact_tiles_to_play: usize,
     ) -> Vec<PossibleMove> {
         // First check if this spot is actually empty. If it isn't, return early.
-        if self.board[(row, col)] != ' ' {
+        if self.board[(row, col)] != EMPTY {
             return Vec::new();
         }
 
@@ -221,7 +255,7 @@ impl ScrabbleGame {
             false, // backwards
         );
         for item in word_start_iter.skip(1) {
-            if item.char_at_coords == ' ' {
+            if item.char_at_coords == EMPTY {
                 // If we encounter an empty spot, leave the loop.
                 break;
             }
@@ -240,12 +274,12 @@ impl ScrabbleGame {
         );
         for item in rest_of_word_iter {
             // Out of tiles and need to place another? Break.
-            if tiles_remaining == 0 && item.char_at_coords == ' ' {
+            if tiles_remaining == 0 && item.char_at_coords == EMPTY {
                 break;
             }
 
             // We still have tiles to place, and we need to place one here. Do so.
-            if item.char_at_coords == ' ' && tiles_remaining > 0 {
+            if item.char_at_coords == EMPTY && tiles_remaining > 0 {
                 word_bitmask.push(user_tiles_bitmask);
                 tiles_remaining -= 1;
                 possible_tile_placements.push(item.coords);
@@ -285,10 +319,7 @@ impl ScrabbleGame {
             .filter(|(_, bitmask_vec)| bitmasks_match(&bitmask_vec, &word_bitmask))
             .map(|(word, _)| word)
         {
-            let mut possible_move = PossibleMove {
-                tiles: vec![],
-                score: 0,
-            };
+            let mut possible_move_tiles: Vec<TilePlacement> = Vec::new();
 
             let mut required_tile_counts: HashMap<char, usize> = HashMap::new();
 
@@ -301,23 +332,30 @@ impl ScrabbleGame {
                 }] as char;
                 *required_tile_counts.entry(tile_to_place).or_insert(0) += 1;
 
-                possible_move.tiles.push(TilePlacement {
+                possible_move_tiles.push(TilePlacement {
                     coords: *potential_tile_placement,
                     tile: tile_to_place,
                 });
             }
 
-            // Loop through the required tiles in order to form this new word.
-            if required_tile_counts.iter().any(
-                |(candidate_word_char, candidate_word_char_count)| {
-                    // Are there any that the player doesn't have in their set?
-                    !user_tile_counts_by_char.contains_key(candidate_word_char)
-                        // Or are there any that the user doesn't have enough of?
-                        || candidate_word_char_count > &user_tile_counts_by_char[candidate_word_char]
-                },
-            ) {
-                // If so, this word can't be played with the players tiles.
-                continue;
+            let mut consumed_wildcards = 0;
+            for (required_tile, required_count_of_tile) in required_tile_counts {
+                // Loop through the required tiles in order to form this new word.
+
+                let wildcards_available =
+                    user_tile_counts_by_char.get(&WILD).unwrap_or(&0) - &consumed_wildcards;
+
+                let player_tile_count = user_tile_counts_by_char.get(&required_tile).unwrap_or(&0);
+
+                // If the player has enough tiles and wildcards to form the word, then it is valid.
+                if player_tile_count + wildcards_available >= required_count_of_tile {
+                    // Consume the wildcards needed for this word. Use max() here to avoid underflow.
+                    consumed_wildcards +=
+                        max(required_count_of_tile, *player_tile_count) - player_tile_count;
+                } else {
+                    // If the player does not, then this word is impossible.
+                    continue 'candidate_word_main_loop;
+                }
             }
 
             // By this point, we should have the word multiplier and tile scores for all previously placed tiles forming this new word.
@@ -327,8 +365,7 @@ impl ScrabbleGame {
             // First add all our placed tiles to the score, taking into account letter multipliers.
             let mut possible_move_score = new_primary_word_score_multiplier
                 * (new_primary_word_score_base
-                    + possible_move
-                        .tiles
+                    + possible_move_tiles
                         .iter()
                         .map(|tile| {
                             SCORES[tile.tile as usize]
@@ -340,14 +377,14 @@ impl ScrabbleGame {
                         })
                         .sum::<u32>());
 
-            if possible_move.tiles.len() == 7 {
+            if possible_move_tiles.len() == 7 {
                 // Playing 7 tiles at once gives an extra 50 points.
                 possible_move_score += 50;
             }
 
             // Now loop through our tiles and find any new words formed along the opposite direction. If any of these words is invalid, then we must reject this move.
             // Otherwise, add the score to the base score.
-            for possible_tile_placement in &possible_move.tiles {
+            for possible_tile_placement in &possible_move_tiles {
                 let new_word_formed = self.gather_board_tiles_along_vector(
                     possible_tile_placement.coords,
                     possible_tile_placement.tile,
@@ -393,8 +430,10 @@ impl ScrabbleGame {
                 possible_move_score += new_word_formed_score;
             }
 
-            possible_move.score = possible_move_score;
-            possible_moves.push(possible_move);
+            possible_moves.push(PossibleMove {
+                tiles: possible_move_tiles,
+                score: possible_move_score,
+            });
         }
 
         possible_moves
@@ -422,7 +461,7 @@ impl ScrabbleGame {
         let mut result: Vec<PossibleMove> = Vec::new();
 
         // First case: the middle tile is empty, meaning that we can place any word we want there.
-        if self.board[(7, 7)] == ' ' {
+        if self.board[(7, 7)] == EMPTY {
             result.append(&mut self.get_moves_from_spot(chars, 7, 7, true));
             result.append(&mut self.get_moves_from_spot(chars, 7, 7, false));
 
@@ -447,14 +486,14 @@ impl ScrabbleGame {
                     start, horizontal, false, // backwards
                 )
                 // + 1 on the vector distance because this closure is being invoked on the tile adjacent to the one we want to place on.
-                .take_while(|x| x.char_at_coords == ' ' && x.vector_distance + 1 <= chars.len())
+                .take_while(|x| x.char_at_coords == EMPTY && x.vector_distance + 1 <= chars.len())
                 .map(|x| (x.coords, Some(x.vector_distance + 1))),
             );
         };
 
         for row in 0..15 {
             for column in 0..15 {
-                if self.board[(row, column)] == ' ' {
+                if self.board[(row, column)] == EMPTY {
                     continue;
                 }
 
@@ -832,5 +871,29 @@ mod tests {
         // With a bingo bonus, it should be 60
         let moves = board.get_moves_from_spot_exact_length("ABALONE", 7, 7, false, 7);
         assert_eq!(moves[0].score, 60);
+    }
+
+    #[test]
+    fn test_wildcard_chars() {
+        let board = ScrabbleGame::new(2);
+
+        let moves = board.get_moves_from_spot_exact_length("*F", 7, 7, true, 2);
+
+        // There are 5 valid 2-letter words with an F: EF, FA, FE, IF, and OF, all worth 5 points at (7,7)
+        assert_eq!(moves.len(), 5);
+        assert!(moves.iter().all(|m| {
+            if m.score != 5 {
+                return false;
+            }
+
+            let word = m.tiles.iter().map(|t| t.tile).collect::<String>();
+            return word == "EF" || word == "FA" || word == "FE" || word == "IF" || word == "OF";
+        }));
+
+        let moves = board.get_moves_from_spot_exact_length("****Z", 7, 7, true, 5);
+        moves
+            .iter()
+            .find(|w| w.tiles.iter().map(|t| t.tile).collect::<String>() == "ZANZA")
+            .expect("Should find that weird word.");
     }
 }

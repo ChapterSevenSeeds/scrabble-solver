@@ -1,3 +1,4 @@
+use crate::common::WILD;
 use std::collections::HashMap;
 
 /// Creates a map that maps the chars from a string to how many times each char occurs.
@@ -10,8 +11,14 @@ pub fn char_count_to_map(chars: &str) -> HashMap<char, usize> {
     result
 }
 
+pub const ANY_CHAR_BITMASK: u32 = (1 << 26) - 1; // Should be 26 bits for A-Z
+
 /// Encode a character as a bitmask. 'A' is 1, 'B' is 2, 'C' is 4, etc.
 pub fn encode_char(c: char) -> u32 {
+    if c == WILD {
+        return ANY_CHAR_BITMASK;
+    }
+
     1 << (c as u32 - 'A' as u32)
 }
 

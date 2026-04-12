@@ -17,13 +17,9 @@ impl Debug for TilePlacement {
 }
 
 #[derive(Clone, Debug)]
-pub enum PossibleMove {
-    Pass,
-    Exchange(String),
-    Place {
-        tiles: Vec<TilePlacement>,
-        score: u32,
-    },
+pub struct PossibleMove {
+    pub(crate) tiles: Vec<TilePlacement>,
+    pub(crate) score: u32,
 }
 
 /// Zero-indexed player number (0, 1, 2, or 3)
@@ -80,3 +76,6 @@ pub const SCORES: [u32; 91] = {
         10,
     ]
 };
+
+pub const EMPTY: char = ' ';
+pub const WILD: char = '*';
