@@ -5,12 +5,24 @@ use crate::common::{
     WILD,
 };
 use crate::tile_bag::TileBag;
+use crate::tile_bag::TileBagSnapshot;
 use crate::utils::{
     bitmasks_match, char_count_to_map, convert_chars_to_bit_vec, encode_char, encode_chars,
 };
+use serde::{Deserialize, Serialize};
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+
+#[derive(Serialize, Deserialize)]
+struct ScrabbleGameSnapshot {
+    turn: Player,
+    bag: TileBagSnapshot,
+    player_scores: HashMap<Player, i32>,
+    winner: Option<Player>,
+    total_players: usize,
+    board_rows: Vec<String>,
+}
 
 pub struct ScrabbleGame {
     board: ScrabbleBoard,
@@ -90,6 +102,18 @@ impl ScrabbleGame {
         self.board.dump()
     }
 
+    pub fn board_rows(&self) -> Vec<String> {
+        let mut board_rows = Vec::with_capacity(15);
+        for row in 0..15 {
+            let mut line = String::with_capacity(15);
+            for col in 0..15 {
+                line.push(self.board[(row, col)]);
+            }
+            board_rows.push(line);
+        }
+        board_rows
+    }
+
     pub fn bag_tile_count(&self) -> usize {
         self.bag.get_tile_count()
     }
@@ -104,6 +128,47 @@ impl ScrabbleGame {
 
     pub fn winner_index(&self) -> Option<usize> {
         self.winner
+    }
+
+    pub fn to_json(&self) -> Result<String, String> {
+        let snapshot = ScrabbleGameSnapshot {
+            turn: self.turn,
+            bag: self.bag.to_snapshot(),
+            player_scores: self.player_scores.clone(),
+            winner: self.winner,
+            total_players: self.total_players,
+            board_rows: self.board_rows(),
+        };
+
+        serde_json::to_string(&snapshot).map_err(|err| err.to_string())
+    }
+
+    pub fn from_json(json: &str) -> Result<Self, String> {
+        let snapshot: ScrabbleGameSnapshot =
+            serde_json::from_str(json).map_err(|err| err.to_string())?;
+
+        if snapshot.total_players == 0 || snapshot.total_players > 4 {
+            return Err("Invalid player count in save data".to_string());
+        }
+
+        if snapshot.board_rows.len() != 15 || snapshot.board_rows.iter().any(|r| r.chars().count() != 15)
+        {
+            return Err("Invalid board dimensions in save data".to_string());
+        }
+
+        let mut game = Self::new(snapshot.total_players);
+        game.turn = snapshot.turn;
+        game.bag = TileBag::from_snapshot(snapshot.bag);
+        game.player_scores = snapshot.player_scores;
+        game.winner = snapshot.winner;
+
+        for (row, line) in snapshot.board_rows.iter().enumerate() {
+            for (col, tile) in line.chars().enumerate() {
+                game.board[(row, col)] = tile;
+            }
+        }
+
+        Ok(game)
     }
 
     pub fn parse_str(total_players: usize, board_str: &str) -> Self {

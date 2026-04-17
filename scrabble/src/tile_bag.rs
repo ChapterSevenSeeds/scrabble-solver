@@ -2,11 +2,21 @@ use crate::common::{MAX_PLAYER_TILES, Player, TilePlacement, WILD};
 use rand::prelude::SliceRandom;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
+use serde::{Deserialize, Serialize};
 use std::cmp::min;
 use std::collections::HashMap;
 
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct TileBagSnapshot {
+    pub seed: u64,
+    pub exchange_count: u64,
+    pub tiles: Vec<char>,
+    pub players_tiles: HashMap<Player, HashMap<char, usize>>,
+}
+
 pub struct TileBag {
-    rng: StdRng,
+    seed: u64,
+    exchange_count: u64,
     tiles: Vec<char>,
     players_tiles: HashMap<Player, HashMap<char, usize>>,
 }
@@ -60,8 +70,8 @@ impl TileBag {
         insert('X', 1);
         insert('K', 1);
 
-        let mut rng = StdRng::seed_from_u64(seed);
-        all_tiles.shuffle(&mut rng);
+        let mut initial_shuffle_rng = StdRng::seed_from_u64(seed);
+        all_tiles.shuffle(&mut initial_shuffle_rng);
 
         let mut players_tiles = HashMap::<Player, HashMap<char, usize>>::new();
 
@@ -76,9 +86,33 @@ impl TileBag {
         }
 
         TileBag {
+            seed,
+            exchange_count: 0,
             tiles: all_tiles,
             players_tiles,
-            rng,
+        }
+    }
+
+    fn shuffle_tiles_with_seed(tiles: &mut Vec<char>, seed: u64) {
+        let mut rng = StdRng::seed_from_u64(seed);
+        tiles.shuffle(&mut rng);
+    }
+
+    pub(crate) fn to_snapshot(&self) -> TileBagSnapshot {
+        TileBagSnapshot {
+            seed: self.seed,
+            exchange_count: self.exchange_count,
+            tiles: self.tiles.clone(),
+            players_tiles: self.players_tiles.clone(),
+        }
+    }
+
+    pub(crate) fn from_snapshot(snapshot: TileBagSnapshot) -> TileBag {
+        TileBag {
+            seed: snapshot.seed,
+            exchange_count: snapshot.exchange_count,
+            tiles: snapshot.tiles,
+            players_tiles: snapshot.players_tiles,
         }
     }
 
@@ -132,8 +166,10 @@ impl TileBag {
             self.tiles.push(tile);
         }
 
-        // Shuffle
-        self.tiles.shuffle(&mut self.rng);
+        // Shuffle deterministically so game saves can restore exact future behavior.
+        let shuffle_seed = self.seed ^ self.exchange_count;
+        Self::shuffle_tiles_with_seed(&mut self.tiles, shuffle_seed);
+        self.exchange_count += 1;
 
         // Then replenish
         self.remove_and_replenish(turn, &Vec::new());

@@ -1,0 +1,15 @@
+{
+  "name": "scrabble-solver-monorepo",
+  "private": true,
+  "workspaces": [
+    "web"
+  ],
+  "scripts": {
+    "dev": "npm run build:wasm && npm --workspace web run dev",
+    "build": "npm run build:wasm && npm --workspace web run build",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "test:web": "npm --workspace web run test"
+  }
+}
+
+
