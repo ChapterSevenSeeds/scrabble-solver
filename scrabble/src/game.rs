@@ -151,7 +151,8 @@ impl ScrabbleGame {
             return Err("Invalid player count in save data".to_string());
         }
 
-        if snapshot.board_rows.len() != 15 || snapshot.board_rows.iter().any(|r| r.chars().count() != 15)
+        if snapshot.board_rows.len() != 15
+            || snapshot.board_rows.iter().any(|r| r.chars().count() != 15)
         {
             return Err("Invalid board dimensions in save data".to_string());
         }
@@ -549,9 +550,10 @@ impl ScrabbleGame {
         row: usize,
         col: usize,
         horizontal: bool,
+        minimum_tile_count: Option<usize>
     ) -> Vec<PossibleMove> {
         let mut result: Vec<PossibleMove> = Vec::new();
-        for tiles in 1..=chars.len() {
+        for tiles in minimum_tile_count.unwrap_or(1)..=chars.len() {
             result.append(
                 &mut self.get_moves_from_spot_exact_length(chars, row, col, horizontal, tiles),
             );
@@ -565,8 +567,8 @@ impl ScrabbleGame {
 
         // First case: the middle tile is empty, meaning that we can place any word we want there.
         if self.board[(7, 7)] == EMPTY {
-            result.append(&mut self.get_moves_from_spot(chars, 7, 7, true));
-            result.append(&mut self.get_moves_from_spot(chars, 7, 7, false));
+            result.append(&mut self.get_moves_from_spot(chars, 7, 7, true, None));
+            result.append(&mut self.get_moves_from_spot(chars, 7, 7, false, None));
 
             return result;
         }
@@ -577,8 +579,7 @@ impl ScrabbleGame {
            2. For vertical, do the same thing but for up and down.
         */
 
-        let mut horizontal_coords_to_check: HashSet<((usize, usize), Option<usize>)> =
-            HashSet::new(); // (row, column, required length)
+        let mut horizontal_coords_to_check: HashSet<((usize, usize), Option<usize>)> = HashSet::new(); // (row, column, minimum required tile placement count)
         let mut vertical_coords_to_check: HashSet<((usize, usize), Option<usize>)> = HashSet::new();
 
         let extend_coord_set = |coord_set: &mut HashSet<((usize, usize), Option<usize>)>,
@@ -622,18 +623,8 @@ impl ScrabbleGame {
             (horizontal_coords_to_check, true),
             (vertical_coords_to_check, false),
         ] {
-            for ((row, column), length) in coords {
-                if let Some(len) = length {
-                    result.append(&mut self.get_moves_from_spot_exact_length(
-                        chars,
-                        row,
-                        column,
-                        is_horizontal,
-                        len,
-                    ));
-                } else {
-                    result.append(&mut self.get_moves_from_spot(chars, row, column, is_horizontal));
-                }
+            for ((row, column), min_tile_count) in coords {
+                result.append(&mut self.get_moves_from_spot(chars, row, column, is_horizontal, min_tile_count));
             }
         }
 
@@ -781,7 +772,7 @@ mod tests {
         let mut board = ScrabbleGame::new(2);
 
         board.place_word("SPEED", 0, 0, true);
-        let possible_words = board.get_moves_from_spot("AFOOI", 1, 0, true);
+        let possible_words = board.get_moves_from_spot("AFOOI", 1, 0, true, None);
 
         // Two words from (1, 0) horizontally: OI and OAF.
 
@@ -1011,5 +1002,27 @@ mod tests {
             .iter()
             .find(|w| w.tiles.iter().map(|t| t.tile).collect::<String>() == "ZANZA")
             .expect("Should find that weird word.");
+    }
+
+    #[test]
+    fn test_that_one_game_that_thought_that_thin_was_invalid_move() {
+        let mut board = ScrabbleGame::new_with_seed(2, 8);
+        let player0_tiles = board.bag.get_tiles(0);
+        assert!(
+            player0_tiles.contains("T")
+                && player0_tiles.contains("I")
+                && player0_tiles.contains("N")
+        );
+
+        board.place_word("SELL", 7, 7, true);
+        board.place_word("PHOEBE", 2, 8, false);
+
+        // The issue with this one was that iterating backwards from an adjacent tile was throwing in the length requirement as both a min and a max, not just a min.
+        let valid_moves = board.get_moves();
+        assert!(
+            valid_moves
+                .iter()
+                .any(|m| m.tiles.iter().map(|t| t.tile).collect::<String>() == "TIN" && m.tiles[0].coords == (3, 7))
+        );
     }
 }

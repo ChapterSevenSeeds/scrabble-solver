@@ -16,10 +16,32 @@ impl Debug for TilePlacement {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct PossibleMove {
     pub(crate) tiles: Vec<TilePlacement>,
     pub(crate) score: u32,
+}
+
+impl Debug for PossibleMove {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        let is_horizontal = self.tiles.iter().fold(true, |acc, tile| {
+            acc && tile.coords.0 == self.tiles[0].coords.0
+        });
+
+        write!(
+            f,
+            "{} {} ({}, {}): {}",
+            self.score,
+            if is_horizontal {
+                "Horizontal"
+            } else {
+                "Vertical"
+            },
+            self.tiles[0].coords.0,
+            self.tiles[0].coords.1,
+            self.tiles.iter().map(|tile| tile.tile).collect::<String>()
+        )
+    }
 }
 
 impl PossibleMove {

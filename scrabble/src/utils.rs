@@ -27,6 +27,7 @@ pub fn encode_chars(chars: &str) -> u32 {
     chars.chars().fold(0, |acc, c| acc | encode_char(c))
 }
 
+/// Maps the chars from a string into a vector of bitmasks.
 pub fn convert_chars_to_bit_vec(word: &str) -> Vec<u32> {
     word.chars().map(|c| encode_char(c)).collect()
 }
@@ -46,6 +47,7 @@ pub fn word_matches_bitmask(word: &String, mask: &Vec<u32>) -> bool {
     true
 }
 
+/// Check if two bitmask vectors overlap any bits at each element.
 pub fn bitmasks_match(left: &Vec<u32>, right: &Vec<u32>) -> bool {
     if left.len() != right.len() {
         return false;
