@@ -38,6 +38,10 @@ impl Debug for ScrabbleGame {
 
 impl ScrabbleGame {
     pub fn new(total_players: usize) -> Self {
+        Self::new_with_seed(total_players, rand::random())
+    }
+
+    pub fn new_with_seed(total_players: usize, seed: u64) -> Self {
         if total_players > 4 {
             panic!("Scrabble only supports up to 4 players");
         }
@@ -61,11 +65,45 @@ impl ScrabbleGame {
                 },
             ),
             turn: 0,
-            bag: TileBag::new(total_players),
+            bag: TileBag::new_with_seed(total_players, seed),
             player_scores: HashMap::new(),
             winner: None,
             total_players,
         }
+    }
+
+    pub fn current_turn(&self) -> usize {
+        self.turn
+    }
+
+    pub fn total_players(&self) -> usize {
+        self.total_players
+    }
+
+    pub fn scores(&self) -> Vec<i32> {
+        (0..self.total_players)
+            .map(|player| *self.player_scores.get(&player).unwrap_or(&0))
+            .collect()
+    }
+
+    pub fn board_dump(&self) -> String {
+        self.board.dump()
+    }
+
+    pub fn bag_tile_count(&self) -> usize {
+        self.bag.get_tile_count()
+    }
+
+    pub fn rack_for_player(&self, player: usize) -> String {
+        self.bag.get_tiles(player)
+    }
+
+    pub fn current_player_rack(&self) -> String {
+        self.bag.get_tiles(self.turn)
+    }
+
+    pub fn winner_index(&self) -> Option<usize> {
+        self.winner
     }
 
     pub fn parse_str(total_players: usize, board_str: &str) -> Self {
@@ -537,6 +575,15 @@ impl ScrabbleGame {
         result
     }
 
+    fn move_sort_key(move_to_sort: &PossibleMove) -> String {
+        move_to_sort
+            .tiles
+            .iter()
+            .map(|tile| format!("{:02}{:02}{}", tile.coords.0, tile.coords.1, tile.tile))
+            .collect::<Vec<String>>()
+            .join("|")
+    }
+
     /// Returns all possible moves from a given tileset.
     pub fn get_moves(&self) -> Vec<PossibleMove> {
         if self.winner.is_some() {
@@ -544,8 +591,12 @@ impl ScrabbleGame {
         }
 
         let mut result: Vec<PossibleMove> = self.get_moves_helper(&*self.bag.get_tiles(self.turn));
-        // Sort by score descending.
-        result.sort_by(|a, b| b.score.cmp(&a.score));
+        // Deterministic sort by score descending, then by placement key for stable seeded tests.
+        result.sort_by(|a, b| {
+            b.score
+                .cmp(&a.score)
+                .then_with(|| Self::move_sort_key(a).cmp(&Self::move_sort_key(b)))
+        });
         result
     }
 }

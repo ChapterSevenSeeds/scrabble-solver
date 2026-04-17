@@ -1,16 +1,22 @@
 use crate::common::{MAX_PLAYER_TILES, Player, TilePlacement, WILD};
-use rand::prelude::{SliceRandom, ThreadRng};
+use rand::prelude::SliceRandom;
+use rand::rngs::StdRng;
+use rand::SeedableRng;
 use std::cmp::min;
 use std::collections::HashMap;
 
 pub struct TileBag {
-    rng: ThreadRng,
+    rng: StdRng,
     tiles: Vec<char>,
     players_tiles: HashMap<Player, HashMap<char, usize>>,
 }
 
 impl TileBag {
     pub fn new(total_players: usize) -> TileBag {
+        Self::new_with_seed(total_players, rand::random())
+    }
+
+    pub fn new_with_seed(total_players: usize, seed: u64) -> TileBag {
         let mut all_tiles = Vec::new();
 
         let mut insert = |letter: char, count: usize| {
@@ -54,7 +60,7 @@ impl TileBag {
         insert('X', 1);
         insert('K', 1);
 
-        let mut rng = rand::rng();
+        let mut rng = StdRng::seed_from_u64(seed);
         all_tiles.shuffle(&mut rng);
 
         let mut players_tiles = HashMap::<Player, HashMap<char, usize>>::new();
@@ -106,16 +112,12 @@ impl TileBag {
     pub fn get_tiles(&self, turn: Player) -> String {
         let relevant_set = self.players_tiles.get(&turn).unwrap();
 
-        relevant_set
+        let mut tiles: Vec<char> = relevant_set
             .iter()
-            .filter_map(|(tile, count)| {
-                if *count > 0 {
-                    Some(tile.to_string().repeat(*count))
-                } else {
-                    None
-                }
-            })
-            .collect()
+            .flat_map(|(tile, count)| std::iter::repeat_n(*tile, *count))
+            .collect();
+        tiles.sort_unstable();
+        tiles.into_iter().collect()
     }
 
     pub fn exchange(&mut self, turn: Player, tiles: String) {

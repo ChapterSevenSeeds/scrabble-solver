@@ -4,7 +4,7 @@ pub const MAX_PLAYER_TILES: usize = 7;
 
 pub type Coords = (usize, usize);
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TilePlacement {
     pub coords: Coords,
     pub tile: char,
@@ -16,10 +16,20 @@ impl Debug for TilePlacement {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PossibleMove {
     pub(crate) tiles: Vec<TilePlacement>,
     pub(crate) score: u32,
+}
+
+impl PossibleMove {
+    pub fn get_score(&self) -> u32 {
+        self.score
+    }
+
+    pub fn get_tiles(&self) -> &[TilePlacement] {
+        &self.tiles
+    }
 }
 
 /// Zero-indexed player number (0, 1, 2, or 3)
