@@ -550,7 +550,7 @@ impl ScrabbleGame {
         row: usize,
         col: usize,
         horizontal: bool,
-        minimum_tile_count: Option<usize>
+        minimum_tile_count: Option<usize>,
     ) -> Vec<PossibleMove> {
         let mut result: Vec<PossibleMove> = Vec::new();
         for tiles in minimum_tile_count.unwrap_or(1)..=chars.len() {
@@ -579,7 +579,8 @@ impl ScrabbleGame {
            2. For vertical, do the same thing but for up and down.
         */
 
-        let mut horizontal_coords_to_check: HashSet<((usize, usize), Option<usize>)> = HashSet::new(); // (row, column, minimum required tile placement count)
+        let mut horizontal_coords_to_check: HashSet<((usize, usize), Option<usize>)> =
+            HashSet::new(); // (row, column, minimum required tile placement count)
         let mut vertical_coords_to_check: HashSet<((usize, usize), Option<usize>)> = HashSet::new();
 
         let extend_coord_set = |coord_set: &mut HashSet<((usize, usize), Option<usize>)>,
@@ -624,7 +625,13 @@ impl ScrabbleGame {
             (vertical_coords_to_check, false),
         ] {
             for ((row, column), min_tile_count) in coords {
-                result.append(&mut self.get_moves_from_spot(chars, row, column, is_horizontal, min_tile_count));
+                result.append(&mut self.get_moves_from_spot(
+                    chars,
+                    row,
+                    column,
+                    is_horizontal,
+                    min_tile_count,
+                ));
             }
         }
 
@@ -1020,9 +1027,30 @@ mod tests {
         // The issue with this one was that iterating backwards from an adjacent tile was throwing in the length requirement as both a min and a max, not just a min.
         let valid_moves = board.get_moves();
         assert!(
-            valid_moves
-                .iter()
-                .any(|m| m.tiles.iter().map(|t| t.tile).collect::<String>() == "TIN" && m.tiles[0].coords == (3, 7))
+            valid_moves.iter().any(
+                |m| m.tiles.iter().map(|t| t.tile).collect::<String>() == "TIN"
+                    && m.tiles[0].coords == (3, 7) && m.tiles[0].tile == 'T' && m.tiles[1].coords == (3, 9) && m.tiles[1].tile == 'I' && m.tiles[2].coords == (3, 10) && m.tiles[2].tile == 'N'
+            )
+        );
+    }
+
+    #[test]
+    fn test_gameplay_weirdness() {
+        let mut board = ScrabbleGame::new_with_seed(2, 32);
+        let player0_tiles = board.bag.get_tiles(0);
+        assert!(player0_tiles.contains("G") && player0_tiles.contains("O"));
+
+        board.place_word("NONBANKS", 7, 4, true);
+        board.place_word("FINDS", 5, 9, false);
+
+        println!("{}", board.board_dump());
+
+        let valid_moves = board.get_moves();
+        assert!(
+            valid_moves.iter().any(
+                |m| m.tiles.iter().map(|t| t.tile).collect::<String>() == "GO"
+                    && m.tiles[0].coords == (6, 5) && m.tiles[0].tile == 'G' && m.tiles[1].coords == (6, 6) && m.tiles[1].tile == 'O'
+            )
         );
     }
 }

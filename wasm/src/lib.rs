@@ -33,6 +33,7 @@ struct GameStateView {
     current_turn: usize,
     total_players: usize,
     scores: Vec<i32>,
+    tiles_in_bag: usize,
     winner: Option<usize>,
     racks: Vec<String>,
     current_rack: String,
@@ -160,6 +161,7 @@ impl WasmGame {
             current_turn: self.game.current_turn(),
             total_players: self.game.total_players(),
             scores: self.game.scores(),
+            tiles_in_bag: self.game.bag_tile_count(),
             winner: self.game.winner_index(),
             racks: (0..self.game.total_players())
                 .map(|player| self.game.rack_for_player(player))
