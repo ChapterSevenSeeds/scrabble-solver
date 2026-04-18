@@ -1,7 +1,7 @@
 use scrabble::game::ScrabbleGame;
 
 pub fn main() {
-    let mut board = ScrabbleGame::new(4);
+    let mut board = ScrabbleGame::new(2);
 
     loop {
         if board.winner.is_some() {

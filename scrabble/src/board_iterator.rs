@@ -14,7 +14,6 @@ pub struct ScrabbleBoardIterator<'a> {
 pub struct ScrabbleBoardIteratorItem {
     pub coords: Coords,
     pub char_at_coords: char,
-    pub vector_distance: usize,
 }
 
 impl ScrabbleBoardIterator<'_> {
@@ -50,12 +49,7 @@ impl Iterator for ScrabbleBoardIterator<'_> {
             self.current_coords.0 as usize,
             self.current_coords.1 as usize,
         );
-        let current_char = self.board[(current_coords.0, current_coords.1)];
-        let vector_distance = if self.horizontal {
-            (current_coords.1 as i32 - self.start.1 as i32).unsigned_abs()
-        } else {
-            (current_coords.0 as i32 - self.start.0 as i32).unsigned_abs()
-        } as usize;
+        let current_char = self.board[current_coords];
 
         // Don't return None until we have gone past the end in either direction.
 
@@ -76,7 +70,6 @@ impl Iterator for ScrabbleBoardIterator<'_> {
         Some(ScrabbleBoardIteratorItem {
             coords: current_coords,
             char_at_coords: current_char,
-            vector_distance,
         })
     }
 }

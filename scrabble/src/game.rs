@@ -320,6 +320,30 @@ impl ScrabbleGame {
         word
     }
 
+    fn coord_has_adjacent_tile(&self, coords: Coords) -> bool {
+        // Up
+        if coords.0 > 0 && self.board[(coords.0 - 1, coords.1)] != EMPTY {
+            return true;
+        }
+
+        // Left
+        if coords.1 > 0 && self.board[(coords.0, coords.1 - 1)] != EMPTY {
+            return true;
+        }
+
+        // Right
+        if coords.1 < 14 && self.board[(coords.0, coords.1 + 1)] != EMPTY {
+            return true;
+        }
+
+        // Down
+        if coords.0 < 14 && self.board[(coords.0 + 1, coords.1)] != EMPTY {
+            return true;
+        }
+
+        false
+    }
+
     /// Returns a vector of all the possible moves that can be made from this spot with a certain tileset by playing an exact number of tiles.
     fn get_moves_from_spot_exact_length(
         &self,
@@ -377,13 +401,20 @@ impl ScrabbleGame {
             true, // forwards
         );
         for item in rest_of_word_iter {
+            if item.char_at_coords != EMPTY {
+                // This spot on the board already has a tile in it. We will add it to the bitmask so that we only consider words with that tile in that spot.
+                word_bitmask.push(encode_char(item.char_at_coords));
+                new_primary_word_score_base += SCORES[item.char_at_coords as usize];
+                continue;
+            }
+
             // Out of tiles and need to place another? Break.
-            if tiles_remaining == 0 && item.char_at_coords == EMPTY {
+            if tiles_remaining == 0 {
                 break;
             }
 
             // We still have tiles to place, and we need to place one here. Do so.
-            if item.char_at_coords == EMPTY && tiles_remaining > 0 {
+            if tiles_remaining > 0 {
                 word_bitmask.push(user_tiles_bitmask);
                 tiles_remaining -= 1;
                 possible_tile_placements.push(item.coords);
@@ -394,15 +425,20 @@ impl ScrabbleGame {
                     ScoreModifier::TWS => new_primary_word_score_multiplier *= 3,
                     _ => (),
                 }
-            } else {
-                // This spot on the board already has a tile in it. We will add it to the bitmask so that we only consider words with that tile in that spot.
-                word_bitmask.push(encode_char(item.char_at_coords));
-                new_primary_word_score_base += SCORES[item.char_at_coords as usize];
             }
         }
 
         // If we got here but still have tiles to play, then we careened off the edge of the board. No moves can be played.
         if tiles_remaining > 0 {
+            return Vec::new();
+        }
+
+        // Now go see if any of the tiles we placed is adjacent to another tile. If there isn't one, then the move is valid only if the middle square is empty.
+        if !possible_tile_placements
+            .iter()
+            .any(|&coords| self.coord_has_adjacent_tile(coords))
+            && self.board[(7, 7)] != EMPTY
+        {
             return Vec::new();
         }
 
@@ -507,20 +543,20 @@ impl ScrabbleGame {
 
                 // New word is valid. Calculate score.
                 let mut new_word_formed_score = new_word_formed
-                    .chars()
-                    .map(|c| SCORES[c as usize])
-                    .sum::<u32>()
-                    // Subtract the raw score of the tile we are placing so we don't count it twice.
-                    - SCORES[possible_tile_placement.tile as usize]
-                    // Then add it back with the letter multiplier, if any.
-                    + (SCORES[possible_tile_placement.tile as usize]
-                    * match SCORE_MODIFIERS[possible_tile_placement.coords.0]
-                    [possible_tile_placement.coords.1]
-                {
-                    ScoreModifier::DLS => 2,
-                    ScoreModifier::TLS => 3,
-                    _ => 1,
-                });
+                        .chars()
+                        .map(|c| SCORES[c as usize])
+                        .sum::<u32>()
+                        // Subtract the raw score of the tile we are placing so we don't count it twice.
+                        - SCORES[possible_tile_placement.tile as usize]
+                        // Then add it back with the letter multiplier, if any.
+                        + (SCORES[possible_tile_placement.tile as usize]
+                        * match SCORE_MODIFIERS[possible_tile_placement.coords.0]
+                        [possible_tile_placement.coords.1]
+                    {
+                        ScoreModifier::DLS => 2,
+                        ScoreModifier::TLS => 3,
+                        _ => 1,
+                    });
 
                 // And then multiply by any word multipliers, if any.
                 new_word_formed_score *= match SCORE_MODIFIERS[possible_tile_placement.coords.0]
@@ -573,65 +609,15 @@ impl ScrabbleGame {
             return result;
         }
 
-        /*  If the middle tile is empty, then new moves must touch previous tiles. Do the following:
-           1. For horizontal, find all previously placed tiles that do not have a tile directly to the left or right.
-               For all tiles that do not have one directly to the left, iterate the empty spot leftwards up until the tile count.
-           2. For vertical, do the same thing but for up and down.
-        */
-
-        let mut horizontal_coords_to_check: HashSet<((usize, usize), Option<usize>)> =
-            HashSet::new(); // (row, column, minimum required tile placement count)
-        let mut vertical_coords_to_check: HashSet<((usize, usize), Option<usize>)> = HashSet::new();
-
-        let extend_coord_set = |coord_set: &mut HashSet<((usize, usize), Option<usize>)>,
-                                start: Coords,
-                                horizontal: bool| {
-            coord_set.extend(
-                self.create_board_iterator(
-                    start, horizontal, false, // backwards
-                )
-                // + 1 on the vector distance because this closure is being invoked on the tile adjacent to the one we want to place on.
-                .take_while(|x| x.char_at_coords == EMPTY && x.vector_distance + 1 <= chars.len())
-                .map(|x| (x.coords, Some(x.vector_distance + 1))),
-            );
-        };
-
+        // Now loop through all empty tiles and generate all possible moves for each of them.
         for row in 0..15 {
-            for column in 0..15 {
-                if self.board[(row, column)] == EMPTY {
+            for col in 0..15 {
+                if self.board[(row, col)] != EMPTY {
                     continue;
                 }
 
-                if column > 0 {
-                    extend_coord_set(&mut horizontal_coords_to_check, (row, column - 1), true);
-                }
-
-                if column < 14 {
-                    horizontal_coords_to_check.insert(((row, column + 1), None));
-                }
-
-                if row > 0 {
-                    extend_coord_set(&mut vertical_coords_to_check, (row - 1, column), false);
-                }
-
-                if row < 14 {
-                    vertical_coords_to_check.insert(((row + 1, column), None));
-                }
-            }
-        }
-
-        for (coords, is_horizontal) in [
-            (horizontal_coords_to_check, true),
-            (vertical_coords_to_check, false),
-        ] {
-            for ((row, column), min_tile_count) in coords {
-                result.append(&mut self.get_moves_from_spot(
-                    chars,
-                    row,
-                    column,
-                    is_horizontal,
-                    min_tile_count,
-                ));
+                result.extend(self.get_moves_from_spot(chars, row, col, true, None));
+                result.extend(self.get_moves_from_spot(chars, row, col, false, None));
             }
         }
 
@@ -1029,7 +1015,12 @@ mod tests {
         assert!(
             valid_moves.iter().any(
                 |m| m.tiles.iter().map(|t| t.tile).collect::<String>() == "TIN"
-                    && m.tiles[0].coords == (3, 7) && m.tiles[0].tile == 'T' && m.tiles[1].coords == (3, 9) && m.tiles[1].tile == 'I' && m.tiles[2].coords == (3, 10) && m.tiles[2].tile == 'N'
+                    && m.tiles[0].coords == (3, 7)
+                    && m.tiles[0].tile == 'T'
+                    && m.tiles[1].coords == (3, 9)
+                    && m.tiles[1].tile == 'I'
+                    && m.tiles[2].coords == (3, 10)
+                    && m.tiles[2].tile == 'N'
             )
         );
     }
@@ -1049,7 +1040,10 @@ mod tests {
         assert!(
             valid_moves.iter().any(
                 |m| m.tiles.iter().map(|t| t.tile).collect::<String>() == "GO"
-                    && m.tiles[0].coords == (6, 5) && m.tiles[0].tile == 'G' && m.tiles[1].coords == (6, 6) && m.tiles[1].tile == 'O'
+                    && m.tiles[0].coords == (6, 5)
+                    && m.tiles[0].tile == 'G'
+                    && m.tiles[1].coords == (6, 6)
+                    && m.tiles[1].tile == 'O'
             )
         );
     }
