@@ -56,6 +56,7 @@ dependencies = [
 name = "console"
 version = "0.1.0"
 dependencies = [
+ "rand 0.10.0",
  "scrabble",
  "stopwatch",
 ]
@@ -511,6 +512,7 @@ name = "wasm"
 version = "0.1.0"
 dependencies = [
  "getrandom",
+ "rand 0.10.0",
  "scrabble",
  "serde",
  "serde_json",

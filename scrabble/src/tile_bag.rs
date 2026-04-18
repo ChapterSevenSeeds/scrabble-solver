@@ -22,11 +22,7 @@ pub struct TileBag {
 }
 
 impl TileBag {
-    pub fn new(total_players: usize) -> TileBag {
-        Self::new_with_seed(total_players, rand::random())
-    }
-
-    pub fn new_with_seed(total_players: usize, seed: u64) -> TileBag {
+    pub fn new(total_players: usize, seed: u64) -> TileBag {
         let mut all_tiles = Vec::new();
 
         let mut insert = |letter: char, count: usize| {
@@ -186,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_tile_bag_initialization() {
-        let bag = TileBag::new(2);
+        let bag = TileBag::new(2, 5);
 
         // Total tiles should be 100 - 14 (7 per player * 2 players)
         // 100 total tiles in Scrabble
@@ -196,7 +192,7 @@ mod tests {
     #[test]
     fn test_tile_bag_initializes_all_players() {
         let total_players = 4;
-        let bag = TileBag::new(total_players);
+        let bag = TileBag::new(total_players, 5);
 
         // Each player should have exactly MAX_PLAYER_TILES tiles
         for player in 0..total_players {
@@ -207,7 +203,7 @@ mod tests {
 
     #[test]
     fn test_correct_tile_distribution() {
-        let bag = TileBag::new(1);
+        let bag = TileBag::new(1, 5);
 
         // Verify player has 7 tiles
         let player_tiles = bag.get_tiles(0);
@@ -220,7 +216,7 @@ mod tests {
 
     #[test]
     fn test_get_tiles_returns_string() {
-        let bag = TileBag::new(2);
+        let bag = TileBag::new(2, 5);
 
         let player_0_tiles = bag.get_tiles(0);
         let player_1_tiles = bag.get_tiles(1);
@@ -234,7 +230,7 @@ mod tests {
 
     #[test]
     fn test_remove_and_replenish_basic() {
-        let mut bag = TileBag::new(2);
+        let mut bag = TileBag::new(2, 5);
 
         let initial_tiles = bag.get_tiles(0);
         let initial_tile_count = bag.get_tile_count();
@@ -256,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_remove_and_replenish_multiple_tiles() {
-        let mut bag = TileBag::new(2);
+        let mut bag = TileBag::new(2, 5);
 
         let initial_tile_count = bag.get_tile_count();
         let player_tiles = bag.get_tiles(0);
@@ -283,7 +279,7 @@ mod tests {
 
     #[test]
     fn test_remove_and_replenish_specific_tile() {
-        let mut bag = TileBag::new(1);
+        let mut bag = TileBag::new(1, 5);
 
         let initial_tiles_str = bag.get_tiles(0);
         let initial_tile_count = bag.get_tile_count();
@@ -309,7 +305,7 @@ mod tests {
 
     #[test]
     fn test_exchange_tiles() {
-        let mut bag = TileBag::new(1);
+        let mut bag = TileBag::new(1, 5);
 
         let initial_tiles = bag.get_tiles(0);
         let initial_bag_count = bag.get_tile_count();
@@ -328,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_exchange_returns_different_tiles() {
-        let mut bag = TileBag::new(1);
+        let mut bag = TileBag::new(1, 5);
 
         let initial_tiles = bag.get_tiles(0);
         let tiles_to_exchange = initial_tiles.clone();
@@ -345,7 +341,7 @@ mod tests {
 
     #[test]
     fn test_get_tile_count_decreases_with_replenish() {
-        let mut bag = TileBag::new(1);
+        let mut bag = TileBag::new(1, 5);
 
         let count_before = bag.get_tile_count();
 
@@ -365,7 +361,7 @@ mod tests {
 
     #[test]
     fn test_multiple_players_independent() {
-        let mut bag = TileBag::new(3);
+        let mut bag = TileBag::new(3, 5);
 
         let player_0_initial = bag.get_tiles(0);
 
@@ -385,7 +381,7 @@ mod tests {
 
     #[test]
     fn test_tile_count_consistency() {
-        let mut bag = TileBag::new(2);
+        let mut bag = TileBag::new(2, 5);
 
         let initial_bag_count = bag.get_tile_count();
         let initial_player_count = bag.get_tiles(0).len() + bag.get_tiles(1).len();
@@ -410,7 +406,7 @@ mod tests {
 
     #[test]
     fn test_remove_and_replenish_near_empty_bag() {
-        let mut bag = TileBag::new(4);
+        let mut bag = TileBag::new(4, 5);
 
         // Manually remove most tiles from the bag for testing
         for _ in 0..bag.get_tile_count() - 2 {
@@ -436,7 +432,7 @@ mod tests {
 
     #[test]
     fn test_exchange_with_few_tiles_in_bag() {
-        let mut bag = TileBag::new(1);
+        let mut bag = TileBag::new(1, 5);
 
         let tiles_to_exchange = bag.get_tiles(0).chars().take(3).collect::<String>();
         bag.exchange(0, tiles_to_exchange);
@@ -447,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_get_tiles_contains_valid_characters() {
-        let bag = TileBag::new(2);
+        let bag = TileBag::new(2, 5);
 
         let valid_tiles: Vec<char> = vec![
             'E', 'A', 'I', 'O', 'N', 'R', 'T', 'D', 'L', 'S', 'U', 'B', 'C', 'M', 'P', 'F', 'H',
@@ -462,7 +458,7 @@ mod tests {
 
     #[test]
     fn test_new_bag_has_all_tiles() {
-        let bag = TileBag::new(1);
+        let bag = TileBag::new(1, 5);
 
         // Count all tiles (in bag + with player)
         let mut tile_counts: HashMap<char, usize> = HashMap::new();
@@ -479,7 +475,7 @@ mod tests {
 
     #[test]
     fn test_wildcard_replenish() {
-        let mut bag = TileBag::new(2);
+        let mut bag = TileBag::new(2, 5);
 
         bag.tiles.clear();
         bag.tiles.extend("ABCDEFGABCDEFG".chars());
@@ -516,7 +512,7 @@ mod tests {
 
     #[test]
     fn test_replenish_no_underflow() {
-        let mut bag = TileBag::new(2);
+        let mut bag = TileBag::new(2, 5);
 
         bag.tiles.clear();
         bag.tiles.extend("ABCDEFGABCDEFG".chars());

@@ -1,6 +1,7 @@
 use scrabble::game::ScrabbleGame;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
+use rand::random;
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 enum SeatKind {
@@ -114,7 +115,7 @@ impl WasmGame {
         }
 
         Ok(WasmGame {
-            game: ScrabbleGame::new(total_players),
+            game: ScrabbleGame::new(total_players, random()),
             seats,
         })
     }

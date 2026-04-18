@@ -46,10 +46,6 @@ type DraftPlacement = {
   col: number;
 };
 
-type LegalMoveView = {
-  tiles: Array<{ row: number; col: number; tile: string }>;
-};
-
 type PendingWildcardPlacement = {
   rackIndex: number;
   row: number;
@@ -70,11 +66,6 @@ const cellId = (row: number, col: number) => `cell:${row}:${col}`;
 const rackId = (rackIndex: number) => `rack:${rackIndex}`;
 const pendingId = (rackIndex: number) => `pending:${rackIndex}`;
 const rackDropId = "rack-drop";
-const placementKey = (placements: Array<{ row: number; col: number; tile: string }>) =>
-  placements
-    .map((p) => `${p.row}:${p.col}:${p.tile}`)
-    .sort()
-    .join("|");
 
 const parseCellId = (id: string): CellCoords | null => {
   const [prefix, row, col] = id.split(":");
@@ -357,17 +348,11 @@ export function App() {
 
     try {
       await queueGameOp(async () => {
-        const legalMoves = JSON.parse(game.getLegalMovesJson()) as LegalMoveView[];
-        const draftKey = placementKey(
-          draftPlacements.map((p) => ({ row: p.row, col: p.col, tile: p.placedTile }))
+        game.playMoveByPlacementsJson(
+          JSON.stringify(
+            draftPlacements.map((p) => ({ row: p.row, col: p.col, tile: p.placedTile }))
+          )
         );
-        const moveIndex = legalMoves.findIndex((move) => placementKey(move.tiles) === draftKey);
-
-        if (moveIndex < 0) {
-          throw new Error("Placed tiles are not a legal move");
-        }
-
-        game.playMoveByIndex(moveIndex);
         await wait(0);
         resetInteractionState();
         setError("");

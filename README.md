@@ -49,7 +49,6 @@ npm run build:wasm
 
 ```powershell
 cargo test -p scrabble
-cargo test -p scrabble --test game_seeded_e2e
 ```
 
 ## Save/Resume Behavior

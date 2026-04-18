@@ -8,7 +8,6 @@ pub struct ScrabbleBoardIterator<'a> {
 
     // So that we actually iterate over everything, we use i32 so that we can see if we go negative when going backwards.
     current_coords: (i32, i32),
-    start: Coords,
 }
 
 pub struct ScrabbleBoardIteratorItem {
@@ -27,7 +26,6 @@ impl ScrabbleBoardIterator<'_> {
             forwards,
             horizontal,
             current_coords: (start.0 as i32, start.1 as i32),
-            start,
             board,
         }
     }
